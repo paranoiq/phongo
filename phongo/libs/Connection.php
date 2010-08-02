@@ -191,7 +191,7 @@ class Connection extends Object implements IConnection {
             $this->mongo = new Mongo($dsn, array("connect" => TRUE));
             $this->mongo->connect();
 		} catch (MongoConnectionException $e) {
-            throw new ConnectionException($e->getMessage(), $dsn);
+            throw new DatabaseException($e->getMessage(), $dsn);
         }
         
         return $this;
