@@ -553,14 +553,15 @@ class Connection extends Object implements IConnection {
     
     
     /** @return array */
-    public function getDatabaseList() {
+    /*public function getDatabaseList() {
         $result = $this->checkResult($this->mongo->listDBs());
+        dump($result);
 		$list = array();
         foreach ($result['databases'] as $database) {
             $list[$database['name']] = $database['name'];
         }
         return $list;
-    }
+    }*/
     
     /** @param string */
     public function getCollectionList($database = NULL) {

@@ -43,20 +43,44 @@ class DatabaseInfo extends Object {
         return $status;
     }
     
-    /** @param string */
+    /** @return array */
     public function getCommandList() {
         $stats = $this->db->runCommand(array('listCommands' => 1), 'admin');
         return $stats['commands'];
     }
     
-    /** @param string */
+    /** @return array */
+    public function getDatabaseInfo() {
+        $info = $this->db->runCommand(array('listDatabases' => 1), 'admin');
+        unset($info['ok']);
+        return $info;
+    }
+    
+    /** @return array */
+    public function getDatabaseList() {
+        $result = $this->getDatabaseInfo();
+        $list = array();
+        foreach ($result['databases'] as $database) {
+            $list[$database['name']] = $database['name'];
+        }
+        return $list;
+    }
+    
+    /**
+     * @param string
+     * @return array
+     */
     public function getDatabaseStats($database = NULL) {
         $stats = $this->db->runCommand(array('dbStats' => 1), $database);
         unset($stats['ok']);
         return $stats;
     }
     
-    /** @param string */
+    /**
+     * @param string
+     * @param string
+     * @return array
+     */
     public function getCollectionStats($collection, $database = NULL) {
         $stats = $this->db->runCommand(array('collStats' => $collection), $database);
         unset($stats['ok']);
