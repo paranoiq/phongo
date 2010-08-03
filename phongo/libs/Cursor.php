@@ -44,7 +44,7 @@ class Cursor extends Object implements ICursor {
     }
     
     /**
-     * @return @array
+     * @return array
      */
     public function fetch() {
         $cursor = $this->getCursor();
@@ -53,6 +53,17 @@ class Cursor extends Object implements ICursor {
         $item = $cursor->getNext();
         
         return Converter::mongoToPhongo($item);
+    }
+    
+    /**
+     * @return array<array>
+     */    
+    public function fetchAll() {
+        $results = array();
+        while ($item = $this->fetch()) {
+            $results[] = $item;
+        }
+        return $results;
     }
     
     /**
