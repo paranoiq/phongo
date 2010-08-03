@@ -50,7 +50,7 @@ class DatabaseInfo extends Object {
     }
     
     /** @return array */
-    public function getDatabaseInfo() {
+    private function getDatabaseInfo() {
         $info = $this->db->runCommand(array('listDatabases' => 1), 'admin');
         unset($info['ok']);
         return $info;
@@ -74,6 +74,24 @@ class DatabaseInfo extends Object {
         $stats = $this->db->runCommand(array('dbStats' => 1), $database);
         unset($stats['ok']);
         return $stats;
+    }
+    
+    /** @param string */
+    private function getNamespaces($database = NULL) {
+        $cursor = $this->db->find(array(), array(), 'system.namespaces', $database);
+        return $cursor->fetchAll();
+    }
+    
+    /** @param string */
+    public function getCollectionList($database = NULL) {
+        $result = $this->getNamespaces($database);
+        $list = array();
+        foreach ($result as $ns) {
+            if (strpos($ns['name'], '.system.') !== FALSE || strpos($ns['name'], '.$') !== FALSE) continue;
+            $collection = substr($ns['name'], strpos($ns['name'], '.') + 1);
+            $list[$collection] = $collection;
+        }
+        return $list;
     }
     
     /**

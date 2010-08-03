@@ -552,27 +552,6 @@ class Connection extends Object implements IConnection {
     // -- METADATA -----------------------------------------------------------------------------------------------------
     
     
-    /** @return array */
-    /*public function getDatabaseList() {
-        $result = $this->checkResult($this->mongo->listDBs());
-        dump($result);
-		$list = array();
-        foreach ($result['databases'] as $database) {
-            $list[$database['name']] = $database['name'];
-        }
-        return $list;
-    }*/
-    
-    /** @param string */
-    public function getCollectionList($database = NULL) {
-        $result = $this->getDatabase($database)->listCollections();
-        $list = array();
-        foreach ($result as $collection) {
-            $list[$collection->getName()] = $collection->getName();
-        }
-        return $list;
-    }
-    
     /**
      * @param string
      * @param string
