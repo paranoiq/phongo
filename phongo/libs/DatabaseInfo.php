@@ -76,13 +76,19 @@ class DatabaseInfo extends Object {
         return $stats;
     }
     
-    /** @param string */
+    /**
+     * @param string
+     * @return array<array>
+     */
     private function getNamespaces($database = NULL) {
         $cursor = $this->db->find(array(), array(), 'system.namespaces', $database);
         return $cursor->fetchAll();
     }
     
-    /** @param string */
+    /**
+     * @param string
+     * @return array
+     */
     public function getCollectionList($database = NULL) {
         $result = $this->getNamespaces($database);
         $list = array();
@@ -99,7 +105,24 @@ class DatabaseInfo extends Object {
      * @param string
      * @return array
      */
-    public function getCollectionStats($collection, $database = NULL) {
+    public function getIndexList($collection = NULL, $database = NULL) {
+        $namespace = ($database ?: $this->db->getDatabaseName()) . '.' . ($collection ?: $this->db->getCollectionName);
+        $cursor = $this->db->find(array('ns' => $namespace), array(), 'system.indexes', $database);
+        $indexes = array();
+        while ($index = $cursor->fetch()) {
+            $keys = implode(',', array_keys($index['key']));
+            $indexes[$index['name']] = $keys;
+        }
+        return $indexes;
+    }
+    
+    /**
+     * @param string
+     * @param string
+     * @return array
+     */
+    public function getCollectionStats($collection = NULL, $database = NULL) {
+        if (!$collection) $collection = $this->db->getCollectionName();
         $stats = $this->db->runCommand(array('collStats' => $collection), $database);
         unset($stats['ok']);
         return $stats;

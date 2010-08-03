@@ -549,41 +549,17 @@ class Connection extends Object implements IConnection {
     }
     
     
-    // -- METADATA -----------------------------------------------------------------------------------------------------
+    // -- DATABASES ----------------------------------------------------------------------------------------------------
     
-    
-    /**
-     * @param string
-     * @param string
-     */
-    public function getIndexList($collection = NULL, $database = NULL) {
-        $indexInfo = $this->getCollection($collection, $database)->getIndexInfo();
-        $indexes = array();
-        foreach ($indexInfo as $index) {
-            $keys = implode(',', array_keys($index['key']));
-            $indexes[$index['name']] = $keys;
-        }
-        return $indexes;
-    }
     
     /**
      * @return string
      */
     public function getDatabaseName() {
+        if (!$this->database)
+            throw new InvalidStateException('No database selected.');
         return $this->databaseName;
     }
-    
-    /**
-     * @return string
-     */
-    public function getCollectionName() {
-        if (!$this->collection) return NULL;
-        return $this->collection->getName();
-    }
-    
-    
-    // -- DATABASES ----------------------------------------------------------------------------------------------------
-    
     
     /** @param string */
     public function selectDatabase($database) {
@@ -631,6 +607,15 @@ class Connection extends Object implements IConnection {
     
     // -- COLLECTIONS --------------------------------------------------------------------------------------------------
     
+    
+    /**
+     * @return string
+     */
+    public function getCollectionName() {
+        if (!$this->collection) 
+            throw new InvalidStateException('No collection selected.');
+        return $this->collection->getName();
+    }
     
     /**
      * @param string
