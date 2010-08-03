@@ -206,6 +206,12 @@ class Connection extends Object implements IConnection {
     
     // ping
     
+    /** @return bool */
+    public function isMaster() {
+        $result = $this->runCommand(array('isMaster' => 1), 'admin');
+        return (bool)$result['ismaster'];
+    }
+    
     /** @param array */
     public function shutdownServer() {
         return $this->runCommand(array('shutdown' => 1), 'admin');
@@ -227,10 +233,15 @@ class Connection extends Object implements IConnection {
         return !empty($result['fsyncLock']);
     }
     
-    /** @return bool */
-    public function isMaster() {
-        $result = $this->runCommand(array('isMaster' => 1), 'admin');
-        return (bool)$result['ismaster'];
+    /** @return array<array> */
+    public function getOperationList() {
+        $result = $this->findOne(array('$all' => 1), array(), '$cmd.sys.inprog', 'admin');
+        return $result['inprog'];
+    }
+    
+    /** @return array */
+    public function terminateOperation($operationId) {
+        return $this->findOne(array('op' => (int)$operationId), array(), '$cmd.sys.killop', 'admin');
     }
     
     
