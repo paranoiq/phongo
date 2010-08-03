@@ -224,7 +224,7 @@ class Connection extends Object implements IConnection {
     /** @return bool */
     public function isLocked() {
         $result = $this->findOne(array(), array(), '$cmd.sys.inprog', 'admin');
-        return isset($result['fsyncLock']) && $result['fsyncLock'];
+        return !empty($result['fsyncLock']);
     }
     
     /** @return bool */
@@ -591,16 +591,6 @@ class Connection extends Object implements IConnection {
     }
     
     
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
     // -- DATABASES ----------------------------------------------------------------------------------------------------
     
     
@@ -774,6 +764,23 @@ class Connection extends Object implements IConnection {
         $this->runCommand(array('reIndex' => $this->getCollection($collection, $database)->getName()), $database);
         
         return $this;
+    }
+    
+    
+    // -- PROCESSES ----------------------------------------------------------------------------------------------------
+    
+    
+    public function getProcessList() {
+        //$list = $this->runCommand(array('currentOp' => 1), 'admin');
+        $list = $this->findOne(array(), array(), '$cmd.sys.inprog', 'admin');
+        
+        $list = $list['inprog'];
+        
+        dump($list);
+    }
+    
+    public function terminateProcess($processId) {
+        ///
     }
     
 }
