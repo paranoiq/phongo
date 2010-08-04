@@ -104,7 +104,7 @@ class DatabaseInfo extends Object {
      * @return array<array>
      */
     private function getNamespaces($database = NULL) {
-        $cursor = $this->db->find(array(), array(), 'system.namespaces', $database);
+        $cursor = $this->db->find(array(), array(), 'system.namespaces', $database)->orderBy(array('name' => 1));
         return $cursor->fetchAll();
     }
     
@@ -130,7 +130,7 @@ class DatabaseInfo extends Object {
      */
     public function getIndexList($collection = NULL, $database = NULL) {
         $namespace = ($database ?: $this->db->getDatabaseName()) . '.' . ($collection ?: $this->db->getCollectionName);
-        $cursor = $this->db->find(array('ns' => $namespace), array(), 'system.indexes', $database);
+        $cursor = $this->db->find(array('ns' => $namespace), array(), 'system.indexes', $database)->orderBy(array('name' => 1));
         $indexes = array();
         while ($index = $cursor->fetch()) {
             $keys = implode(',', array_keys($index['key']));

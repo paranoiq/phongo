@@ -448,7 +448,7 @@ class Connection extends Object implements IConnection {
      * @param array<array|string>
      * @param string
      * @param string
-     * @return array<array> inserted objects     
+     * @return array<array> inserted objects
      */
     public function batchInsert($objects, $collection = NULL, $database = NULL) {
         $options = $this->getOptions();
