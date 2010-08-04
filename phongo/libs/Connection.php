@@ -273,7 +273,7 @@ class Connection extends Object implements IConnection {
      * @param string
      */
     private function getCollection($collection, $database) {
-        if ($this->strictMode && !is_null($collection) && !preg_match('^(system|$cmd)\.', $collection)
+        if ($this->strictMode && !is_null($collection) && !preg_match('/^(system|$cmd)\./', $collection)
             && !in_array($collection, $this->getCollectionList($database))) 
             throw new StructureException("Collection '$collection' is not created!");
         
