@@ -8,10 +8,25 @@ class DatabaseInfo extends Object {
     /** @var IPhongo */
     private $db;
     
+    /** @var array metadata cache */
+    private $cache = array();
+    /** @var bool */
+    private $useCache = FALSE;
+    
+    
     public function __construct(IConnection $connection) {
         $this->db = $connection;
     }
     
+    
+    /**
+     * @param bool
+     * @return DatabaseInfo
+     */
+    public function useCache($useCache = TRUE) {
+        $this->useCache = (bool) $useCache;
+        return $this;
+    }
     
     
     /** @return string */
@@ -45,7 +60,11 @@ class DatabaseInfo extends Object {
     
     /** @return array */
     public function getCommandList() {
+        if ($this->useCache && !empty($this->cache['commands'])) return $this->cache['commands'];
+        
         $stats = $this->db->runCommand(array('listCommands' => 1), 'admin');
+        
+        $this->cache['commands'] = $stats['commands'];
         return $stats['commands'];
     }
     
@@ -58,11 +77,15 @@ class DatabaseInfo extends Object {
     
     /** @return array */
     public function getDatabaseList() {
+        if ($this->useCache && !empty($this->cache['databases'])) return $this->cache['databases'];
+        
         $result = $this->getDatabaseInfo();
         $list = array();
         foreach ($result['databases'] as $database) {
             $list[$database['name']] = $database['name'];
         }
+        
+        $this->cache['databases'] = $list;
         return $list;
     }
     
