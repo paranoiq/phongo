@@ -499,8 +499,6 @@ class Connection extends Object implements IConnection {
         if (!is_array($query)) $query = Converter::jsonToMongo($query);
         if (!is_array($modifier)) $modifier = Converter::jsonToMongo($modifier);
         
-        //dump($query);
-        
         $result = $this->checkResult($this->getCollection($collection, $database)->update($query, $modifier, $options), $this->isSync());
         $this->affectedItems = isset($result['n']) ? $result['n'] : NULL;
         
@@ -521,8 +519,6 @@ class Connection extends Object implements IConnection {
         $options = $this->getOptions();
         if ($single) $options['justOne'] = 1;
         if (!is_array($query)) $query = Converter::jsonToMongo($query);
-        
-        dump($query);
         
         $result = $this->checkResult($this->getCollection($collection, $database)->remove($query, $options), $this->isSync());
         $this->affectedItems = isset($result['n']) ? $result['n'] : NULL;
@@ -746,17 +742,14 @@ class Connection extends Object implements IConnection {
     // -- PROCESSES ----------------------------------------------------------------------------------------------------
     
     
+    /** @return array<array> */
     public function getProcessList() {
-        //$list = $this->runCommand(array('currentOp' => 1), 'admin');
         $list = $this->findOne(array(), array(), '$cmd.sys.inprog', 'admin');
-        
-        $list = $list['inprog'];
-        
-        dump($list);
+        return $list['inprog'];
     }
     
     public function terminateProcess($processId) {
-        ///
+        $this->findOne(array(), array(), '$cmd.sys.killop', 'admin');
     }
     
 }
