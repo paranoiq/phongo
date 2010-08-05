@@ -86,20 +86,25 @@ class Connection extends Object implements IConnection {
     /** @var bool */
     private $strictMode = FALSE;
     
+    /** @var array cursor options */
+    private $options = array();
+    
     /** @var DatabaseInfo */
     private $info;
     
     
     /**
-     * Params:
-     *  - servers ?
-     *  - user
+     * options:
+     *  - servers: array()
+     *  - username
      *  - password
      *  
      *  - safeMode: 0 (safe) - wait for replication on x servers when making an insert/update/delete. immediate return othervise
      *  - fileSync: FALSE (fsync) - force filesync before returning on an insert/update/delete action
-     *  - masterOnly: FALSE (slaveOkay) - use only master server to receive data from cursor
-     *  - timeout: 20000 ms (timeout) - client side cursor timeout
+     *  
+     *  - snapshotMode: FALSE (snapshot) - use snapshot mode for better result consistency
+     *  - slaveOkay: FALSE - can use slave server to receive data from cursor
+     *  - timeout: 20000 ms - client side cursor timeout
      *  - keepAlive: FALSE (immortal) - keep cursor alive on server even if client is not requesting data for a long time
      *  - tailable: FALSE - ability to read result from cursor even after the last result (if they are created later)
      *  
@@ -109,16 +114,22 @@ class Connection extends Object implements IConnection {
      * @param string|array
      * @param string
      */
-    public function __construct($servers = NULL, $params = array()) {
-        if (!$servers) {
+    public function __construct($options = array()) {
+        if (empty($options['servers'])) {
             $this->servers[] = ini_get("mongo.default_host") . ':' . ini_get("mongo.default_port");
-        } elseif (is_array($servers)) {
-            $this->servers = $servers;
+        } elseif (is_array($options['servers'])) {
+            $this->servers = $options['servers'];
         } else {
-            $this->servers[] = $servers;
+            $this->servers[] = $options['servers'];
         }
+        
         //$this->user = $user;
         //$this->password = $password;
+        
+        //$profiler
+        
+        $this->options = array_intersect_key($options, array_flip(
+            array('snapshotMode', 'slaveOkay', 'timeout', 'keepAlive', 'tailable')));
     }
     
     
@@ -259,7 +270,9 @@ class Connection extends Object implements IConnection {
         if (!is_null($database)) {
             if (!preg_match("/^[-!#%&'()+,0-9;>=<@A-Z\[\]^_`a-z{}~]+$/", $database))
                 throw new InvalidArgumentException('Invalid character in database name.');
-            return $this->mongo->selectDB($database);
+            $db = $this->mongo->selectDB($database);
+            $this->database = $db;
+            $this->lastDatabase = $db;
         }
         
         if ($this->database) 
@@ -333,13 +346,15 @@ class Connection extends Object implements IConnection {
      * @param string
      * @return Phongo\ICursor
      */
-    public function find($query = array(), $columns = array(), $collection = NULL, $database = NULL) {
-        //if (!$columns) $columns = array();
+    public function find($query = array(), $fields = array(), $collection = NULL, $database = NULL) {
+        if (!$fields) $fields = array();
+        /*dump($fields);
+        exit;*/
         if (!is_array($query)) $query = Converter::jsonToMongo($query);
         
-        $cursor = $this->getCollection($collection, $database)->find($query);
+        $cursor = $this->getCollection($collection, $database)->find($query, $fields);
         
-        $this->cursor = new $this->cursorClass($cursor);
+        $this->cursor = new $this->cursorClass($cursor, $this->options);
         return $this->cursor;
     }
     
