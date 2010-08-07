@@ -3,7 +3,6 @@
 namespace Phongo;
 
 use Mongo;
-use MongoCollection;
 use MongoConnectionException;
 
 use InvalidStateException;
@@ -25,14 +24,6 @@ if (version_compare(Mongo::VERSION, '1.0.5', '<'))
 interface IConnection {
     /*
     public function connect();
-    public function find();
-    public function findOne();
-    public function get();
-    public function insert();
-    public function save();
-    public function update();
-    public function delete();
-    public function runCommand();
     */
 }
 
@@ -46,50 +37,31 @@ interface IConnection {
  */
 class Connection extends Object implements IConnection {
     
-    /**#@+ request result behavior */
-    const SYNC   = TRUE;
-    const ASYNC  = FALSE;
-    const IGNORE = NULL;
-    /**#@-*/
-    
-    
     /** @var string */
     private $cursorClass = 'Phongo\Cursor';
     
     /** @var array */
     private $servers = array();
     /** @var string */
-    private $user;
+    private $username;
     /** @var string */
     private $password;
     
     /** @var Mongo */
     private $mongo;
-    /** @var MongoDB */
-    private $database;
-    /** @var string */
-    private $databaseName;
-    /** @var MongoCollection */
-    private $collection;
-    /** @var Phongo\ICursor */
-    private $cursor;
-    /** @var integer */
-    private $affectedItems;
     
-    /** @var integer replicate to n servers */
-    private $safeMode = 0;
-    /** @var bool sync to file before returning */
-    private $fileSync = FALSE;
-    /** @var MongoDB used in safe mode for checking results of asynchronous requests */
-    private $lastDatabase;
+    /** @var array<Phongo\IDatabase> active database drivers */
+    private $databases = array();
+    /** @var string name of selected database */
+    private $selected;
     
     /** @var bool */
     private $strictMode = FALSE;
     
-    /** @var array cursor options */
-    private $options = array();
+    /** @var array database options */
+    private $dbOptions = array();
     
-    /** @var DatabaseInfo */
+    /** @var ConnectionInfo */
     private $info;
     
     
@@ -123,13 +95,12 @@ class Connection extends Object implements IConnection {
             $this->servers[] = $options['servers'];
         }
         
-        //$this->user = $user;
-        //$this->password = $password;
+        //$this->username = $options['username'];
+        //$this->password = $options['password'];
         
         //$profiler
-        
-        $this->options = array_intersect_key($options, array_flip(
-            array('snapshotMode', 'slaveOkay', 'timeout', 'keepAlive', 'tailable')));
+        unset($options['servers']);
+        $this->dbOptions = $options;
     }
     
     
@@ -142,35 +113,36 @@ class Connection extends Object implements IConnection {
         return $this;
     }
     
-    /** @param bool */
-    public function setStrictMode($strictMode = TRUE) {
-        $this->strictMode = (bool)$strictMode;
-        return $this;
+    /** @return string */
+    public function getCursorClass() {
+        return $this->cursorClass;
     }
     
-    /** @param bool */
+    /** @param int */
     public function setSafeMode($numServers = 1) {
-        $this->safeMode = (int)$numServers;
+        $this->dbOptions['safeMode'] = $numServers = (int)$numServers;
+        foreach ($this->databases as $db) {
+            $db->setSafeMode($numServers);
+        }
         return $this;
     }
     
     /** @param bool */
     public function setFileSync($fileSync = TRUE) {
-        $this->fileSync = (bool)$fileSync;
+        $this->dbOptions['fileSync'] = $fileSync = (bool)$fileSync;
+        foreach ($this->databases as $db) {
+            $db->setFileSync($fileSync);
+        }
         return $this;
     }
     
-    /** @return bool */
-    public function isSync() {
-        return $this->safeMode || $this->fileSync;
-    }
-    
-    /** @return array */
-    private function getOptions() {
-        $options = array();
-        if ($this->safeMode) $options['safe']  = version_compare(Mongo::VERSION, '1.0.9', '<') ? TRUE : $this->safeMode;
-        if ($this->fileSync) $options['fsync'] = TRUE;
-        return $options;
+    /** @param bool */
+    public function setStrictMode($strictMode = TRUE) {
+        $this->dbOptions['strictMode'] = $strictMode = (bool)$strictMode;
+        foreach ($this->databases as $db) {
+            $db->setStrictMode($strictMode);
+        }
+        return $this;
     }
     
     /** @return array */
@@ -180,7 +152,7 @@ class Connection extends Object implements IConnection {
     
     /** @return DatabaseInfo */
     public function getInfo() {
-        if (!$this->info) $this->info = new DatabaseInfo($this);
+        if (!$this->info) $this->info = new ConnectionInfo($this);
         return $this->info;
     }
     
@@ -192,8 +164,8 @@ class Connection extends Object implements IConnection {
     public function connect() {
         $dsn = 'mongodb://';
         $dsn .= implode(',', $this->servers);
-        if ($this->user) {
-            $dsn .= $this->user;
+        if ($this->username) {
+            $dsn .= $this->username;
             if ($this->password) $dsn .= ':' . $this->password;
             $dsn .= '@';
         }
@@ -219,40 +191,40 @@ class Connection extends Object implements IConnection {
     
     /** @return bool */
     public function isMaster() {
-        $result = $this->runCommand(array('isMaster' => 1), 'admin');
+        $result = $this->getDatabase('admin')->runCommand(array('isMaster' => 1));
         return (bool)$result['ismaster'];
     }
     
     /** @param array */
     public function shutdownServer() {
-        return $this->runCommand(array('shutdown' => 1), 'admin');
+        return $this->getDatabase('admin')->runCommand(array('shutdown' => 1));
     }
     
     /** @param array */
     public function lockWrite() {
-        return $this->runCommand(array('fsync' => 1, 'lock' => 1), 'admin');
+        return $this->getDatabase('admin')->runCommand(array('fsync' => 1, 'lock' => 1));
     }
     
     /** @param array */
     public function unlockWrite() {
-        return $this->findOne(array(), array(), '$cmd.sys.unlock', 'admin');
+        return $this->getDatabase('admin')->findOne(array(), array(), '$cmd.sys.unlock');
     }
     
     /** @return bool */
     public function isLocked() {
-        $result = $this->findOne(array(), array(), '$cmd.sys.inprog', 'admin');
+        $result = $this->getDatabase('admin')->findOne(array(), array(), '$cmd.sys.inprog');
         return !empty($result['fsyncLock']);
     }
     
     /** @return array<array> */
     public function getOperationList() {
-        $result = $this->findOne(array('$all' => 1), array(), '$cmd.sys.inprog', 'admin');
+        $result = $this->getDatabase('admin')->findOne(array('$all' => 1), array(), '$cmd.sys.inprog');
         return $result['inprog'];
     }
     
     /** @return array */
     public function terminateOperation($operationId) {
-        return $this->findOne(array('op' => (int)$operationId), array(), '$cmd.sys.killop', 'admin');
+        return $this->getDatabase('admin')->findOne(array('op' => (int)$operationId), array(), '$cmd.sys.killop');
     }
     
     
@@ -263,323 +235,51 @@ class Connection extends Object implements IConnection {
      * @param string
      * @param bool
      */
-    private function getDatabase($database) {
+    public function getDatabase($database = NULL) {
         if ($this->strictMode && !is_null($database) && !in_array($database, $this->getDatabaseList())) 
             throw new StructureException("Database '$database' is not created!");
         
         if (!is_null($database)) {
             if (!preg_match("/^[-!#%&'()+,0-9;>=<@A-Z\[\]^_`a-z{}~]+$/", $database))
                 throw new InvalidArgumentException('Invalid character in database name.');
-            $db = $this->mongo->selectDB($database);
-            $this->database = $db;
-            $this->lastDatabase = $db;
+            
+            $db = new Database($this, $this->mongo->selectDB($database), $database, $this->dbOptions);
+            $this->databases[$database] = $db;
+            return $db;
         }
         
-        if ($this->database) 
-            return $this->database;
+        if (isset($this->databases[$this->selected])) 
+            return $this->databases[$this->selected];
         
         throw new InvalidStateException('No database selected!');
     }
     
     /**
      * @param string
-     * @param string
+     * @return Phongo\IDatabase
      */
-    private function getCollection($collection, $database) {
-        if ($this->strictMode && !is_null($collection) && !preg_match('/^(system|$cmd)\./', $collection)
-            && !in_array($collection, $this->getCollectionList($database))) 
-            throw new StructureException("Collection '$collection' is not created!");
-        
-        if (!is_null($collection)) 
-            return $this->getDatabase($database)->selectCollection($collection);
-        
-        if ($this->collection) 
-            return $this->collection;
-        
-        throw new InvalidStateException('No collection selected!');
-    }
-    
-    /**
-     * @param array
-     * @param bool 
-     * @return array
-     */
-    private function checkResult($result, $type = self::SYNC) {
-        // special case when a request may return NULL (no action performed)
-        /// co když je akce provedena? sync? async?
-        if ($type === self::IGNORE && $result === NULL) return;
-        
-        if ($type === self::SYNC) {
-            $error = $result;
-        } elseif ($type === self::ASYNC && $this->isSync()) {
-            $error = $this->lastDatabase->lastError();
-        } else {
-            // check only return value
-            if (!$result) 
-                throw new DatabaseException('Asynchronous request failed on sending.', $result);
-            return $result;
-        }
-        
-        if (!isset($error['ok']) || !$error['ok']) {
-            dump($result);
-            exit;
-            throw new DatabaseException($error['err'], $result);
-        }
-        
-        return $result;
-    }
-    
-    
-    // -- DATA QUERIES -------------------------------------------------------------------------------------------------
-    
-    
-    // throw MongoCursorException on safeMode fail
-    // throw MongoCursorTimeoutException on safeMode timeout
-    
-    
-    /**
-     * Find objects. Returns a cursor
-     *          
-     * @param array|string
-     * @param array
-     * @param string
-     * @param string
-     * @return Phongo\ICursor
-     */
-    public function find($query = array(), $fields = array(), $collection = NULL, $database = NULL) {
-        if (!$fields) $fields = array();
-        /*dump($fields);
-        exit;*/
-        if (!is_array($query)) $query = Converter::jsonToMongo($query);
-        
-        $cursor = $this->getCollection($collection, $database)->find($query, $fields);
-        
-        $this->cursor = new $this->cursorClass($cursor, $this->options);
-        return $this->cursor;
-    }
-    
-    
-    /** @return Phongo\ICursor */
-    public function getCursor() {
-        if (!$this->cursor) 
-            throw new InvalidStateException('No cursor available.');
-        
-        return $this->cursor;
-    }
-    
-    
-    /**
-     * Find and return just one object
-     * 
-     * @param array|string
-     * @param array
-     * @param string
-     * @param string
-     * @return array found object
-     */
-    public function findOne($query = array(), $columns = array(), $collection = NULL, $database = NULL) {
-        if (!is_array($query)) $query = Converter::jsonToMongo($query);
-        
-        $result = $this->getCollection($collection, $database)->findOne($query);
-        
-        /// validate!
-        return $result;
-    }
-    
-    
-    /**
-     * Get object by reference or id.
-     *          
-     * @param Reference|string
-     * @param string
-     * @param string
-     * @return Phongo\ICursor
-     */
-    public function get($reference, $collection = NULL, $database = NULL) {
-        if ($reference instanceof Reference) {
-            $result = MongoDBRef::get($this->getDatabase($database), $reference->getReference());
-        } else {
-            $ref = MongoDBRef::create($collection, $reference, $database);
-            $result = MongoDBRef::get($this->getDatabase($database), $ref);
-        }
-        
-        /// validate!
-        return $result;
-    }
-    
-    
-    /**
-     * Returns count of matching objects
-     * 
-     * @param array|string
-     * @param string
-     * @param string
-     * @return int
-     */
-    public function count($query = array(), $collection = NULL, $database = NULL) {
-        if (!is_array($query)) $query = Converter::jsonToMongo($query);
-        
-        return $this->getCollection($collection, $database)->count(array('count' => $query));
-    }
-    
-    
-    /**
-     * Returns data size of matching items
-     * 
-     * /// TODO: implement query
-     * @param string     
-     * @param string
-     * @param string
-     * @return int
-     */
-    public function size($query = array(), $collection = NULL, $database = NULL) {
-        $coll = ($database ?: $this->databaseName) . '.' . $this->getCollection($collection, $database)->getName();
-        /// query
-        return $this->runCommand(array('dataSize' => $coll), $database);
-    }
-    
-    
-    /**
-     * Insert a new object into collection (fails if it exists already)
-     * 
-     * @param array|string
-     * @param string
-     * @param string
-     * @return array inserted object
-     */
-    public function insert($object, $collection = NULL, $database = NULL) {
-        $options = $this->getOptions();
-        if (!is_array($object)) $object = Converter::jsonToMongo($object);
-        
-        $this->checkResult($this->getCollection($collection, $database)->insert($object, $options), $this->isSync());
-        
-        return $object;
-    }
-    
-    
-    /**
-     * Insert an array of new objects into collection (fails if they exist already)
-     * 
-     * @param array<array|string>
-     * @param string
-     * @param string
-     * @return array<array> inserted objects
-     */
-    public function batchInsert($objects, $collection = NULL, $database = NULL) {
-        $options = $this->getOptions();
-        foreach ($objects as $id => $object) {
-            if (!is_array($object)) $objects[$id] = Converter::jsonToMongo($object);
-        }
-        
-        $this->checkResult($this->getCollection($collection, $database)->batchInsert($objects, $options), $this->isSync());
-        
-        return $objects;
-    }
-    
-    
-    /**
-     * Save an object into collection (replace existing or insert a new one)
-     * - does not support fileSync yet?
-     * 
-     * @param array|string
-     * @param string
-     * @param string
-     * @return array saved object     
-     */
-    public function save($object, $collection = NULL, $database = NULL) {
-        $options = $this->getOptions();
-        if (!is_array($object)) $object = Converter::jsonToMongo($object);
-        
-        $this->checkResult($this->getCollection($collection, $database)->save($object, $options), $this->isSync());
-        
-        return $object;
-    }
-    
-    
-    /**
-     * Update existing items in collection or create a new one (upsert)
-     * 
-     * @param array|string
-     * @param array|string
-     * @param bool
-     * @param bool
-     * @param string
-     * @param string
-     * @return integer number of affected items     
-     */
-    public function update($query, $modifier, $single = FALSE, $upsert = FALSE, $collection = NULL, $database = NULL) {
-        $options = $this->getOptions();
-        if (!$single) $options['multiple'] = 1;
-        if ($upsert) $options['upsert'] = 1;
-        if (!is_array($query)) $query = Converter::jsonToMongo($query);
-        if (!is_array($modifier)) $modifier = Converter::jsonToMongo($modifier);
-        
-        $result = $this->checkResult($this->getCollection($collection, $database)->update($query, $modifier, $options), $this->isSync());
-        $this->affectedItems = isset($result['n']) ? $result['n'] : NULL;
-        
-        return $this->affectedItems;
-    }
-    
-    
-    /**
-     * Delete items from collection
-     * 
-     * @param array|sting
-     * @param bool
-     * @param string
-     * @param string
-     * @return integer number of affected items     
-     */
-    public function delete($query, $single = FALSE, $collection = NULL, $database = NULL) {
-        $options = $this->getOptions();
-        if ($single) $options['justOne'] = 1;
-        if (!is_array($query)) $query = Converter::jsonToMongo($query);
-        
-        $result = $this->checkResult($this->getCollection($collection, $database)->remove($query, $options), $this->isSync());
-        $this->affectedItems = isset($result['n']) ? $result['n'] : NULL;
-        
-        return $this->affectedItems;
-    }
-    
-    
-    /**
-     * @param array|string PHP or JSON array
-     * @param string
-     * @return array command result
-     */
-    public function runCommand($command, $database = NULL) {
-        if (!is_array($command)) $command = Converter::jsonToMongo($command);
-        
-        return $this->checkResult($this->getDatabase($database)->command($command));
-    }
-    
-    
-    /** @return integer */
-    public function getAffectedItems() {
-        return $this->affectedItems;
+    public function &__get($name) {
+        $db = $this->getDatabase($name);
+        return $db;
     }
     
     
     // -- DATABASES ----------------------------------------------------------------------------------------------------
     
     
-    /**
-     * @return string
-     */
-    public function getDatabaseName() {
-        if (!$this->database)
-            throw new InvalidStateException('No database selected.');
-        return $this->databaseName;
+    /** @param string */
+    public function selectDatabase($database) {
+        if (!isset($this->databases[$database])) {
+            $this->databases[$database] = $this->getDatabase($database);
+        }
+        $this->selected = $database;
+        
+        return $this;
     }
     
     /** @param string */
-    public function selectDatabase($database) {
-        $this->database = $this->getDatabase($database);
-        $this->lastDatabase = $this->database;
-        $this->databaseName = $database;
-        
-        $this->collection = NULL;
-        $this->cursor = NULL;
+    public function releaseDatabase($database) {
+        unset($this->databases[$database]);
         
         return $this;
     }
@@ -587,168 +287,11 @@ class Connection extends Object implements IConnection {
     /** @param string */
     public function createDatabase($database) {
         // Anti-WTF: empty database can be created only by writing to it
-        $this->runCommand(array('create' => 'tristatricettristribrnychstrikacek'), $database);
-        $this->runCommand(array('drop'   => 'tristatricettristribrnychstrikacek'), $database);
+        $db = $this->getDatabase($database);
+        $db->runCommand(array('create' => 'tristatricettristribrnychstrikacek'));
+        $db->runCommand(array('drop'   => 'tristatricettristribrnychstrikacek'));
         
-        $this->database = $this->selectDatabase($database);
-        
-        return $this;
-    }
-    
-    /** @param string */
-    public function dropDatabase($database) {
-        $this->checkResult($this->getDatabase($database)->drop());
-        
-        return $this;
-    }
-    
-    /** 
-     * @param string
-     * @param bool
-     * @param bool
-     */
-    public function repairDatabase($database, $preserveClonedFiles = FALSE, $backupOriginalFiles = FALSE) {
-        $this->checkResult($this->getDatabase($database)->repair($preserveClonedFiles, $backupOriginalFiles));
-        // Anti-WTF:: repair() deletes database if it's empty. re-create if strict mode is set
-        if ($this->strictMode) $this->createDatabase($database);
-        
-        return $this;
-    }
-    
-    
-    // -- COLLECTIONS --------------------------------------------------------------------------------------------------
-    
-    
-    /**
-     * @return string
-     */
-    public function getCollectionName() {
-        if (!$this->collection) 
-            throw new InvalidStateException('No collection selected.');
-        return $this->collection->getName();
-    }
-    
-    /**
-     * @param string
-     * @param string
-     */
-    public function selectCollection($collection, $database = NULL) {
-        $this->collection = $this->getCollection($collection, $database);
-        $this->cursor = NULL;
-        
-        return $this;
-    }
-    
-    /**
-     * @param string
-     * @param string
-     * @param bool
-     * @param integer
-     * @param integer               
-     */
-    public function createCollection($collection = NULL, $database = NULL, $capped = FALSE, $size = 0, $maxItems = 0) {
-        $collection = $this->getDatabase($database)->createCollection($collection, $capped, $size, $maxItems);
-        if (!($collection instanceof MongoCollection)) $this->checkResult($collection);
-        
-        $this->database = $this->getDatabase($database);
-        $this->collection = $collection;
-        
-        return $this;
-    }
-    
-    /**
-     * @param string
-     * @param string
-     * @param bool     
-     */
-    public function validateCollection($collection = NULL, $database = NULL, $validateData = FALSE) {
-        $this->checkResult($this->getCollection($collection, $database)->validate($validateData = FALSE));
-        
-        return $this;
-    }
-    
-    /**
-     * @param string
-     * @param string
-     */
-    public function dropCollection($collection = NULL, $database = NULL) {
-        $this->checkResult($this->getCollection($collection, $database)->drop());
-        
-        return $this;
-    }
-    
-    /**
-     * @param string
-     * @param string
-     */
-    public function emptyCollection($collection = NULL, $database = NULL) {
-        $this->delete(array(), FALSE, $collection, $database);
-        
-        return $this;
-    }
-    
-    /**
-     * @param string
-     * @param string
-     */
-    public function renameCollection($newCollection, $collection = NULL, $newDatabase = NULL, $database = NULL) {
-        $old = ($database ?: $this->databaseName) . '.' . $this->getCollection($collection, $database)->getName();
-        $new = ($newDatabase ?: $this->databaseName) . '.' . $newCollection;
-        
-        $this->runCommand(array('renameCollection' => $old, 'to' => $new), 'admin');
-        
-        return $this;
-    }
-    
-    
-    // -- INDEXES ------------------------------------------------------------------------------------------------------
-    
-    
-    /**
-     * @param string
-     * @param array
-     * @param string
-     * @param string
-     */
-    public function createIndex($keys, $options = array(), $collection = NULL, $database = NULL) {
-        if (empty($options['background']) && $this->safeMode) $options['safe'] = 1;
-        
-        $result = $this->getCollection($collection, $database)->ensureIndex($keys, $options);
-        $this->checkResult($result, isset($options['safe']));
-        
-        return $this;
-    }
-    
-    /**
-     * @param string
-     * @param string
-     * @param string
-     */
-    public function dropIndex($indexName, $collection = NULL, $database = NULL) {
-        // MongoCollection::deleteIndex() is buggy!
-        $this->runCommand(array(
-            'dropIndexes' => $this->getCollection($collection, $database)->getName(), 
-            'index' => $indexName), $database);
-        
-        return $this;
-    }
-    
-    /**
-     * @param string
-     * @param string
-     */
-    public function dropIndexes($collection = NULL, $database = NULL) {
-        $this->checkResult($this->getCollection($collection, $database)->deleteIndexes());
-        
-        return $this;
-    }
-    
-    /**
-     * @param string
-     * @param string
-     */
-    public function reindexCollection($collection = NULL, $database = NULL) {
-        $this->runCommand(array('reIndex' => $this->getCollection($collection, $database)->getName()), $database);
+        $this->selected = $database;
         
         return $this;
     }
@@ -759,12 +302,15 @@ class Connection extends Object implements IConnection {
     
     /** @return array<array> */
     public function getProcessList() {
-        $list = $this->findOne(array(), array(), '$cmd.sys.inprog', 'admin');
+        $list = $this->getDatabase('admin')->findOne(array(), array(), '$cmd.sys.inprog');
         return $list['inprog'];
     }
     
+    
     public function terminateProcess($processId) {
-        $this->findOne(array(), array(), '$cmd.sys.killop', 'admin');
+        $this->getDatabase('admin')->findOne(array(), array(), '$cmd.sys.killop');
+        
+        return $this;
     }
     
 }
