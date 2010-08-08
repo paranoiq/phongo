@@ -64,6 +64,9 @@ class Connection extends Object implements IConnection {
     /** @var ConnectionInfo */
     private $info;
     
+    /** @var Profiler */
+    private $profiler;
+    
     
     /**
      * options:
@@ -99,6 +102,7 @@ class Connection extends Object implements IConnection {
         //$this->password = $options['password'];
         
         //$profiler
+        
         unset($options['servers']);
         $this->dbOptions = $options;
     }
@@ -156,6 +160,11 @@ class Connection extends Object implements IConnection {
         return $this->info;
     }
     
+    /** @return Profiler */
+    public function getProfiler() {
+        if (!$this->profiler) $this->profiler = new Profiler();
+        return $this->profiler;
+    }
     
     // -- CONNECTION ---------------------------------------------------------------------------------------------------
     
