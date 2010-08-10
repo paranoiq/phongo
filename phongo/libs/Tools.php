@@ -66,7 +66,7 @@ class Tools {
      * @see http://www.mongodb.org/display/DOCS/Collections
      * @param string
      * @param bool
-     * @return bool     
+     * @return bool
      */
     public static function validateCollectionName($name, $system = FALSE) {
         if ($system) {

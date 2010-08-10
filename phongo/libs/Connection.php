@@ -52,8 +52,6 @@ class Connection extends Object implements IConnection {
     
     /** @var array<Phongo\IDatabase> active database drivers */
     private $databases = array();
-    /** @var string name of selected database */
-    private $selected;
     
     /** @var bool */
     private $strictMode = FALSE;
@@ -191,67 +189,60 @@ class Connection extends Object implements IConnection {
     
     /** @return bool */
     public function isMaster() {
-        $result = $this->getDatabase('admin')->runCommand(array('isMaster' => 1));
+        $result = $this->database('admin')->runCommand(array('isMaster' => 1));
         return (bool)$result['ismaster'];
     }
     
     /** @param array */
     public function shutdownServer() {
-        return $this->getDatabase('admin')->runCommand(array('shutdown' => 1));
+        return $this->database('admin')->runCommand(array('shutdown' => 1));
     }
     
     /** @param array */
     public function lockWrite() {
-        return $this->getDatabase('admin')->runCommand(array('fsync' => 1, 'lock' => 1));
+        return $this->database('admin')->runCommand(array('fsync' => 1, 'lock' => 1));
     }
     
     /** @param array */
     public function unlockWrite() {
-        return $this->getDatabase('admin')->findOne(array(), array(), '$cmd.sys.unlock');
+        return $this->database('admin')->findOne(array(), array(), '$cmd.sys.unlock');
     }
     
     /** @return bool */
     public function isLocked() {
-        $result = $this->getDatabase('admin')->findOne(array(), array(), '$cmd.sys.inprog');
+        $result = $this->database('admin')->findOne(array(), array(), '$cmd.sys.inprog');
         return !empty($result['fsyncLock']);
     }
     
     /** @return array<array> */
     public function getOperationList() {
-        $result = $this->getDatabase('admin')->findOne(array('$all' => 1), array(), '$cmd.sys.inprog');
+        $result = $this->database('admin')->findOne(array('$all' => 1), array(), '$cmd.sys.inprog');
         return $result['inprog'];
     }
     
     /** @return array */
     public function terminateOperation($operationId) {
-        return $this->getDatabase('admin')->findOne(array('op' => (int)$operationId), array(), '$cmd.sys.killop');
+        return $this->database('admin')->findOne(array('op' => (int)$operationId), array(), '$cmd.sys.killop');
     }
     
     
-    // -- RESOURCES ----------------------------------------------------------------------------------------------------
+    // -- DATABASES ----------------------------------------------------------------------------------------------------
     
     
     /**
      * @param string
      * @param bool
      */
-    public function getDatabase($database = NULL) {
+    public function database($database) {
         if ($this->strictMode && !is_null($database) && !in_array($database, $this->getDatabaseList())) 
             throw new StructureException("Database '$database' is not created!");
         
-        if (!is_null($database)) {
-            if (!preg_match("/^[-!#%&'()+,0-9;>=<@A-Z\[\]^_`a-z{}~]+$/", $database))
-                throw new InvalidArgumentException('Invalid character in database name.');
-            
-            $db = new Database($this, $this->mongo->selectDB($database), $database, $this->dbOptions);
-            $this->databases[$database] = $db;
-            return $db;
-        }
+        if (!Tools::validateDatabaseName($database))
+            throw new InvalidArgumentException("Database name '$database' is not valid.");
         
-        if (isset($this->databases[$this->selected])) 
-            return $this->databases[$this->selected];
-        
-        throw new InvalidStateException('No database selected!');
+        $db = new Database($this, $this->mongo->selectDB($database), $database, $this->dbOptions);
+        $this->databases[$database] = $db;
+        return $db;
     }
     
     /**
@@ -259,22 +250,8 @@ class Connection extends Object implements IConnection {
      * @return Phongo\IDatabase
      */
     public function &__get($name) {
-        $db = $this->getDatabase($name);
+        $db = $this->database($name);
         return $db;
-    }
-    
-    
-    // -- DATABASES ----------------------------------------------------------------------------------------------------
-    
-    
-    /** @param string */
-    public function selectDatabase($database) {
-        if (!isset($this->databases[$database])) {
-            $this->databases[$database] = $this->getDatabase($database);
-        }
-        $this->selected = $database;
-        
-        return $this;
     }
     
     /** @param string */
@@ -287,28 +264,36 @@ class Connection extends Object implements IConnection {
     /** @param string */
     public function createDatabase($database) {
         // Anti-WTF: empty database can be created only by writing to it
-        $db = $this->getDatabase($database);
+        $db = $this->database($database);
         $db->runCommand(array('create' => 'tristatricettristribrnychstrikacek'));
         $db->runCommand(array('drop'   => 'tristatricettristribrnychstrikacek'));
-        
-        $this->selected = $database;
         
         return $this;
     }
     
     
-    // -- PROCESSES ----------------------------------------------------------------------------------------------------
+    // -- OTHER --------------------------------------------------------------------------------------------------------
+    
+    
+    /**
+     * @param Phongo\Reference
+     * @return array
+     */
+    public function get(Reference $ref) {
+        return $this->getDatabase($ref->database)->get($ref);
+    }
     
     
     /** @return array<array> */
     public function getProcessList() {
-        $list = $this->getDatabase('admin')->findOne(array(), array(), '$cmd.sys.inprog');
+        $list = $this->database('admin')->findOne(array(), array(), '$cmd.sys.inprog');
         return $list['inprog'];
     }
     
     
+    /** @param integer */
     public function terminateProcess($processId) {
-        $this->getDatabase('admin')->findOne(array(), array(), '$cmd.sys.killop');
+        $this->database('admin')->findOne(array(), array(), '$cmd.sys.killop');
         
         return $this;
     }
