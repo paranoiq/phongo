@@ -214,17 +214,6 @@ class Connection extends Object implements IConnection {
         return !empty($result['fsyncLock']);
     }
     
-    /** @return array<array> */
-    public function getOperationList() {
-        $result = $this->database('admin')->findOne(array('$all' => 1), array(), '$cmd.sys.inprog');
-        return $result['inprog'];
-    }
-    
-    /** @return array */
-    public function terminateOperation($operationId) {
-        return $this->database('admin')->findOne(array('op' => (int)$operationId), array(), '$cmd.sys.killop');
-    }
-    
     
     // -- DATABASES ----------------------------------------------------------------------------------------------------
     
@@ -285,17 +274,14 @@ class Connection extends Object implements IConnection {
     
     
     /** @return array<array> */
-    public function getProcessList() {
-        $list = $this->database('admin')->findOne(array(), array(), '$cmd.sys.inprog');
-        return $list['inprog'];
+    public function getProcessList($all = FALSE) {
+        $result = $this->database('admin')->findOne(array('$all' => $all ? 1 : 0), array(), '$cmd.sys.inprog');
+        return $result['inprog'];
     }
     
-    
-    /** @param integer */
+    /** @return array */
     public function terminateProcess($processId) {
-        $this->database('admin')->findOne(array(), array(), '$cmd.sys.killop');
-        
-        return $this;
+        return $this->database('admin')->findOne(array('op' => (int)$processId), array(), '$cmd.sys.killop');
     }
     
 }
