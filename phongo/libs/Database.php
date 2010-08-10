@@ -148,7 +148,7 @@ class Database extends Object implements IDatabase {
         if ($this->collection) 
             return $this->collection;
         
-        throw new InvalidStateException('No collection selected!');
+        throw new \InvalidStateException('No collection selected!');
     }
     
     
@@ -228,17 +228,23 @@ class Database extends Object implements IDatabase {
     
     /**
      * Get object by reference or id.
-     *          
-     * @param Reference|string
+     * 
+     * @param Reference|string|array
      * @param string
      * @return Phongo\ICursor
      */
     public function get($reference, $collection = NULL) {
         if ($reference instanceof Reference) {
-            $result = MongoDBRef::get($this->database, $reference->getReference());
-        } else {
+            $result = MongoDBRef::get($this->database, $reference->getMongoDBRef());
+        } elseif (is_array($reference) && MongoDBRef::validate($reference)) {
+            $result = MongoDBRef::get($this->database, $reference);
+        } elseif (is_string($reference) && strlen($reference) == 24) {
+            if (empty($collection) && empty($this->selected))
+                throw new \InvalidStateException('No collection selected.');
             $ref = MongoDBRef::create($collection, $reference, $this->name);
             $result = MongoDBRef::get($this->database, $ref);
+        } else {
+            throw new \InvalidArgumentException('Invalid database reference.');
         }
         
         /// validate!
