@@ -23,15 +23,10 @@ interface IDatabase {
 
 class Database extends Object implements IDatabase {
     
-    /**#@+ request result behavior */
-    const SYNC   = TRUE;
-    const ASYNC  = FALSE;
-    const IGNORE = NULL;
-    /**#@-*/
-    
     
     /** @var IConnection */
     private $connection;
+    
     /** @var MongoDB */
     private $database;
     /** @var string */
@@ -162,14 +157,14 @@ class Database extends Object implements IDatabase {
      * @param bool 
      * @return array
      */
-    private function checkResult($result, $type = self::SYNC) {
+    private function checkResult($result, $type = Phongo::SYNC) {
         // special case when a request may return NULL (no action performed)
         /// co když je akce provedena? sync? async?
-        if ($type === self::IGNORE && $result === NULL) return;
+        if ($type === Phongo::IGNORE && $result === NULL) return;
         
-        if ($type === self::SYNC) {
+        if ($type === Phongo::SYNC) {
             $error = $result;
-        } elseif ($type === self::ASYNC && $this->isSync()) {
+        } elseif ($type === Phongo::ASYNC && $this->isSync()) {
             $error = $this->lastDatabase->lastError();
         } else {
             // check only return value
@@ -513,7 +508,7 @@ class Database extends Object implements IDatabase {
     
     /** @param string */
     public function reindexCollection($collection = NULL) {
-        $this->runCommand(array('reIndex' => $this->getCollection($collection, $database)->getName()));
+        $this->runCommand(array('reIndex' => $this->getCollection($collection)->getName()));
         
         return $this;
     }
