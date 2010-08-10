@@ -46,8 +46,16 @@ class Database extends Object implements IDatabase {
     /** @var DatabaseInfo */
     private $info;
     
-    /** @var MongoCollection */
+    /** @var array<MongoCollection> */
+    private $collections;
+    
+    /** @var string */
+    private $namespace;
+    /** @var string */
     private $collection;
+    /** @var string */
+    private $tempColl;
+    
     /** @var integer */
     private $affectedItems = NULL;
     
@@ -131,55 +139,99 @@ class Database extends Object implements IDatabase {
     }
     
     
-    // -- RESOURCES ----------------------------------------------------------------------------------------------------
+    // -- COLLECTION SELECTION -----------------------------------------------------------------------------------------
     
+    
+    /**
+     * Select namespace to use
+     * @param string
+     */
+    public function useNamespace($namespace) {
+        $this->namespace = $namespace;
+        $this->tempColl = NULL;
+        $this->collection = NULL;
+        
+        return $this;
+    }
+    
+    /**
+     * Select collection to use
+     * @param string
+     * @param string|NULL
+     */
+    public function useCollection($collection, $namespace = TRUE) {
+        if ($namespace !== TRUE) $this->useNamespace($namespace);
+        $this->tempColl = NULL;
+        $this->collection = $collection;
+        
+        return $this;
+    }
+    
+    /**
+     * Select collection temporarily
+     * @param string
+     */
+    public function collection($collection) {
+        $this->tempColl = $collection;
+        
+        return $this;
+    }
+    
+    /**
+     * provides fluent namespaces: $db->name->space->collection->find();
+     * @param string
+     */
+    public function &__get($name) {
+        if (isset($this->tempColl)) {
+            $this->tempColl .= '.' . $name;
+        } else {
+            $this->tempColl = $name;
+        }
+        
+        return $this;
+    }
     
     /**
      * @param string
      */
     private function getCollection($collection) {
-        if ($this->strictMode && !is_null($collection) && !preg_match('/^(system|$cmd)\./', $collection)
-            && !in_array($collection, $this->getCollectionList($database))) 
-            throw new StructureException("Collection '$collection' is not created!");
+        $name = $this->determineCollectionName($collection);
         
-        if (!is_null($collection)) 
-            return $this->database->selectCollection($collection);
+        if (!is_null($name)) {
+            $coll = $this->database->selectCollection($name);
+            $this->collections[$name] = $coll;
+            return $coll;
+        }
         
-        if ($this->collection) 
-            return $this->collection;
+        if (isset($this->collections[$this->collection])) 
+            return $this->collections[$this->collection];
         
         throw new \InvalidStateException('No collection selected!');
     }
     
-    
     /**
-     * @param array
-     * @param bool 
-     * @return array
+     * @return string
      */
-    private function checkResult($result, $type = Phongo::SYNC) {
-        // special case when a request may return NULL (no action performed)
-        /// co když je akce provedena? sync? async?
-        if ($type === Phongo::IGNORE && $result === NULL) return;
-        
-        if ($type === Phongo::SYNC) {
-            $error = $result;
-        } elseif ($type === Phongo::ASYNC && $this->isSync()) {
-            $error = $this->lastDatabase->lastError();
+    private function determineCollectionName($collection = NULL) {
+        if (isset($collection)) {
+            $name = $collection;
+            if (isset($this->tempColl)) 
+                trigger_error("Collection '$this->tempColl' selected via collection() or __get() is not used. Check your logic!", E_USER_NOTICE);
+        } elseif (isset($this->tempColl)) {
+            $name = $this->tempColl;
+        } elseif (isset($this->collection)) {
+            $name = $this->collection;
         } else {
-            // check only return value
-            if (!$result) 
-                throw new DatabaseException('Asynchronous request failed on sending.', $result);
-            return $result;
+            throw new \InvalidStateException("No collection selected!");
         }
         
-        if (!isset($error['ok']) || !$error['ok']) {
-            dump($result);
-            exit;
-            throw new DatabaseException($error['err'], $result);
-        }
+        if (isset($this->namespace)) $name = $this->namespace . '.' . $name;
         
-        return $result;
+        if ($this->strictMode && !preg_match('/^(local|system|$cmd)\./', $name) && !in_array($name, $this->getInfo()->getCollectionList())) 
+            throw new DatabaseException("Collection '$name' does not exist!");
+        
+        $this->tempColl = NULL;
+        return $name;
     }
     
     
@@ -188,7 +240,7 @@ class Database extends Object implements IDatabase {
     
     /**
      * Find objects. Returns a cursor
-     *          
+     * 
      * @param array|string
      * @param array
      * @param string
@@ -239,9 +291,8 @@ class Database extends Object implements IDatabase {
         } elseif (is_array($reference) && MongoDBRef::validate($reference)) {
             $result = MongoDBRef::get($this->database, $reference);
         } elseif (is_string($reference) && strlen($reference) == 24) {
-            if (empty($collection) && empty($this->selected))
-                throw new \InvalidStateException('No collection selected.');
-            $ref = MongoDBRef::create($collection, $reference, $this->name);
+            $collName = $this->determineCollectionName($collection);
+            $ref = MongoDBRef::create($collName, $reference, $this->name);
             $result = MongoDBRef::get($this->database, $ref);
         } else {
             throw new \InvalidArgumentException('Invalid database reference.');
@@ -270,7 +321,7 @@ class Database extends Object implements IDatabase {
      * Returns data size of matching items
      * 
      * /// TODO: implement query
-     * @param string     
+     * @param string
      * @param string
      * @param string
      * @return int
@@ -398,25 +449,39 @@ class Database extends Object implements IDatabase {
     }
     
     
+    /**
+     * @param array
+     * @param bool 
+     * @return array
+     */
+    private function checkResult($result, $type = Phongo::SYNC) {
+        // special case when a request may return NULL (no action performed)
+        /// co když je akce provedena? sync? async?
+        if ($type === Phongo::IGNORE && $result === NULL) return;
+        
+        if ($type === Phongo::SYNC) {
+            $error = $result;
+        } elseif ($type === Phongo::ASYNC && $this->isSync()) {
+            $error = $this->lastDatabase->lastError();
+        } else {
+            // check only return value
+            if (!$result) 
+                throw new DatabaseException('Asynchronous request failed on sending.', $result);
+            return $result;
+        }
+        
+        if (!isset($error['ok']) || !$error['ok']) {
+            dump($result);
+            exit;
+            throw new DatabaseException($error['err'], $result);
+        }
+        
+        return $result;
+    }
+    
+    
     // -- COLLECTIONS --------------------------------------------------------------------------------------------------
     
-    
-    /**
-     * @return string
-     */
-    public function getCollectionName() {
-        return $this->getCollection()->getName();
-    }
-    
-    /**
-     * @param string
-     * @param string
-     */
-    public function selectCollection($collection) {
-        $this->collection = $this->getCollection($collection);
-        
-        return $this;
-    }
     
     /**
      * @param string
@@ -427,7 +492,8 @@ class Database extends Object implements IDatabase {
     public function createCollection($collection = NULL, $capped = FALSE, $size = 0, $maxItems = 0) {
         $collection = $this->database->createCollection($collection, $capped, $size, $maxItems);
         if ($collection instanceof MongoCollection) {
-            $this->collection = $collection;
+            $this->collection = $collection->getName();
+            $this->collections[$this->collection] = $collection;
         } else {
             $this->checkResult($collection);
         }
@@ -455,6 +521,7 @@ class Database extends Object implements IDatabase {
     /** @param string */
     public function emptyCollection($collection = NULL) {
         $this->delete(array(), FALSE, $collection);
+        /// drop + create?
         
         return $this;
     }
@@ -466,9 +533,9 @@ class Database extends Object implements IDatabase {
      */
     public function renameCollection($newCollection, $newDatabase = NULL, $collection = NULL) {
         $old = $this->name . '.' . $this->getCollection($collection)->getName();
-        $new = ($newDatabase ?: $this->databaseName) . '.' . $newCollection;
+        $new = ($newDatabase ?: $this->name) . '.' . $newCollection;
         
-        $this->connection->admin->runCommand(array('renameCollection' => $old, 'to' => $new));
+        $this->connection->database('admin')->runCommand(array('renameCollection' => $old, 'to' => $new));
         
         return $this;
     }
