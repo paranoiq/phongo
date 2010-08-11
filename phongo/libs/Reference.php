@@ -38,8 +38,8 @@ class Reference extends Object {
      * @param Phongo\Connection|Phongo\Database
      * @return array
      */
-    public function getFrom($resource) {
-        $resource->get($this);
+    public function getObjectFrom($resource) {
+        return $resource->get($this);
     }
     
     /**

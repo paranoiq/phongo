@@ -227,6 +227,9 @@ class Database extends Object implements IDatabase {
         
         if (isset($this->namespace)) $name = $this->namespace . '.' . $name;
         
+        if (!Tools::validateCollectionName($collection, TRUE))
+            throw new \InvalidArgumentException("Collection name '$collection' is not valid.");
+        
         if ($this->strictMode && !preg_match('/^(local|system|$cmd)\./', $name) && !in_array($name, $this->getInfo()->getCollectionList())) 
             throw new DatabaseException("Collection '$name' does not exist!");
         
@@ -489,7 +492,10 @@ class Database extends Object implements IDatabase {
      * @param integer
      * @param integer               
      */
-    public function createCollection($collection = NULL, $capped = FALSE, $size = 0, $maxItems = 0) {
+    public function createCollection($collection, $capped = FALSE, $size = 0, $maxItems = 0) {
+        if (!Tools::validateCollectionName($collection))
+            throw new \InvalidArgumentException("Collection name '$collection' is not valid.");
+        
         $collection = $this->database->createCollection($collection, $capped, $size, $maxItems);
         if ($collection instanceof MongoCollection) {
             $this->collection = $collection->getName();

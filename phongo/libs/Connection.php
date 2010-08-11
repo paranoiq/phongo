@@ -5,9 +5,6 @@ namespace Phongo;
 use Mongo;
 use MongoConnectionException;
 
-use InvalidStateException;
-use InvalidArgumentException;
-
 
 // check PHP version
 if (version_compare(PHP_VERSION, '5.3.0', '<')) 
@@ -105,7 +102,7 @@ class Connection extends Object implements IConnection {
     /** @param string */
     public function setCursorClass($class) {
         if (!in_array('Phongo\ICursor', class_implements($class, /*autoload*/TRUE))) 
-            throw new InvalidArgumentException('Cursor class must implement interface Phongo\ICursor.');
+            throw new \InvalidArgumentException('Cursor class must implement interface Phongo\ICursor.');
         
         $this->cursorClass = $class;
         return $this;
@@ -224,10 +221,10 @@ class Connection extends Object implements IConnection {
      */
     public function database($database) {
         if ($this->strictMode && !is_null($database) && !in_array($database, $this->getDatabaseList())) 
-            throw new StructureException("Database '$database' is not created!");
+            throw new DatabaseException("Database '$database' is not created!");
         
         if (!Tools::validateDatabaseName($database))
-            throw new InvalidArgumentException("Database name '$database' is not valid.");
+            throw new \InvalidArgumentException("Database name '$database' is not valid.");
         
         $db = new Database($this, $this->mongo->selectDB($database), $database, $this->dbOptions);
         $this->databases[$database] = $db;
@@ -252,6 +249,9 @@ class Connection extends Object implements IConnection {
     
     /** @param string */
     public function createDatabase($database) {
+        if (!Tools::validateDatabaseName($database))
+            throw new \InvalidArgumentException("Database name '$database' is not valid.");
+        
         // Anti-WTF: empty database can be created only by writing to it
         $db = $this->database($database);
         $db->runCommand(array('create' => 'tristatricettristribrnychstrikacek'));

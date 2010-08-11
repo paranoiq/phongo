@@ -3,7 +3,7 @@
 namespace Phongo;
 
 
-class Tools {
+final class Tools {
     
     /** Static class - cannot be instantiated. */
     final public function __construct() {
