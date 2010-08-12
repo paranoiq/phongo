@@ -47,11 +47,31 @@ class DatabaseInfo extends Object {
         $result = $this->getNamespaces();
         $list = array();
         foreach ($result as $ns) {
-            if (strpos($ns['name'], '.system.') !== FALSE || strpos($ns['name'], '.$') !== FALSE) continue;
+            if (preg_match('/[$]|^[^.]+\.(system\.|local\.)/', $ns['name'])) continue;
             $collection = substr($ns['name'], strpos($ns['name'], '.') + 1);
             $list[$collection] = $collection;
         }
         return $list;
+    }
+    
+    /**
+     * @param string
+     * @return array<array>|array
+     */
+    public function getCollectionInfo($collection = NULL) {
+        $result = $this->getNamespaces();
+        $list = array();
+        foreach ($result as $ns) {
+            if (preg_match('/[$]|^[^.]+\.(system\.|local\.)/', $ns['name'])) continue;
+            $coll = substr($ns['name'], strpos($ns['name'], '.') + 1);
+            unset($ns['options']['create']);
+            $list[$coll] = isset($ns['options']) ? $ns['options'] : array();
+        }
+        
+        if ($collection === NULL) return $list;
+        if (!isset($list[$collection])) return NULL;
+            //throw new \InvalidArgumentException("Collection '$collection' does not exist.");
+        return $list[$collection];
     }
     
     /**
