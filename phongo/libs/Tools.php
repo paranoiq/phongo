@@ -58,7 +58,7 @@ final class Tools {
      * @return bool
      */
     public static function validateDatabaseName($name) {
-        return preg_match("/^[-!#%&'()+,0-9;>=<@A-Z\[\]^_`a-z{}~]+$/", $name);
+        return (bool) preg_match("/^[-!#%&'()+,0-9;>=<@A-Z\[\]^_`a-z{}~]+$/", $name);
     }
     
     
@@ -76,7 +76,7 @@ final class Tools {
         }
         if (strlen($name) > 126) return FALSE;
         
-        return preg_match('/^[!#\x25-\x2D\x2F-\x7E]+(\.[!#\x25-\x2D\x2F-\x7E]+)*$/', $name);
+        return (bool) preg_match('/^[!#\x25-\x2D\x2F-\x7E]+(\.[!#\x25-\x2D\x2F-\x7E]+)*$/', $name);
     }
     
     
@@ -86,7 +86,7 @@ final class Tools {
      * @return bool
      */
     public static function validateKeyName($name) {
-        return preg_match('/^[\x21-\x2D\x2F-\x7E\x80-\xFF][!"#\x25-\x2D\x2F-\x7E\x80-\xFF]*$/', $name);
+        return (bool) preg_match('/^[!"#\x25-\x2D\x2F-\x7E\x80-\xFF][\x21-\x2D\x2F-\x7E\x80-\xFF]*$/', $name);
     }
     
 }
