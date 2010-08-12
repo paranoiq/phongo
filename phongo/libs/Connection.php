@@ -8,13 +8,13 @@ use MongoConnectionException;
 
 // check PHP version
 if (version_compare(PHP_VERSION, '5.3.0', '<')) 
-	throw new Exception('Phongo needs PHP 5.3.0 or newer.');
+	throw new \Exception('Phongo needs PHP 5.3.0 or newer.');
 // check Mongo extension
 if (!class_exists('Mongo'))
-    throw new Exception('Mongo extension for PHP is not installed.');
+    throw new \Exception('Mongo extension for PHP is not installed.');
 // check Mongo extension version
 if (version_compare(Mongo::VERSION, '1.0.5', '<')) 
-	throw new Exception('Phongo needs Mongo extension 1.0.5 or newer.');
+	throw new \Exception('Phongo needs Mongo extension 1.0.5 or newer.');
 
 
 /** formal Connection interface */
