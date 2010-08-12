@@ -1,0 +1,8 @@
+[php-5.2.0]
+binary = "C:\PHP\php52\php-cgi.exe"
+php.ini = "C:\PHP\php52\php.ini"
+
+[php-5.3.0]
+binary = "C:\PHP\php53\php-cgi.exe"
+php.ini = "C:\PHP\php53\php.ini"
+
