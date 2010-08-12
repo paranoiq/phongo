@@ -230,11 +230,18 @@ class Database extends Object implements IDatabase {
         if (!Tools::validateCollectionName($collection, TRUE))
             throw new \InvalidArgumentException("Collection name '$collection' is not valid.");
         
-        if ($this->strictMode && !preg_match('/^(local|system|$cmd)\./', $name) && !in_array($name, $this->getInfo()->getCollectionList())) 
+        if ($this->strictMode && !preg_match('/^(local|system|$cmd.sys)\./', $name) && !in_array($name, $this->getInfo()->getCollectionList())) 
             throw new DatabaseException("Collection '$name' does not exist!");
         
         $this->tempColl = NULL;
         return $name;
+    }
+    
+    /**
+     * @return string
+     */
+    public function getCollectionName() {
+        return $this->getCollection()->getName();
     }
     
     
