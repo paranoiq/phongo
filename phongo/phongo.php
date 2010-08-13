@@ -15,6 +15,7 @@ require_once dirname(__FILE__) . '/libs/Database.php';
 require_once dirname(__FILE__) . '/libs/Cursor.php';
 require_once dirname(__FILE__) . '/libs/ConnectionInfo.php';
 require_once dirname(__FILE__) . '/libs/DatabaseInfo.php';
+require_once dirname(__FILE__) . '/libs/Cache.php';
 //require_once dirname(__FILE__) . '/libs/Profiler.php';
 //require_once dirname(__FILE__) . '/libs/Prophet.php';
 
