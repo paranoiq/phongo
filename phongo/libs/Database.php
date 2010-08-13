@@ -21,7 +21,7 @@ interface IDatabase {
 }
 
 
-class Database extends Object implements IDatabase {
+class Database extends Base implements IDatabase {
     
     
     /** @var IConnection */
@@ -32,22 +32,14 @@ class Database extends Object implements IDatabase {
     /** @var string */
     private $name;
     
-    /** @var integer replicate to n servers */
-    private $safeMode = 0;
-    /** @var bool sync to file before returning */
-    private $fileSync = FALSE;
-    
-    /** @var bool */
-    private $strictMode = FALSE;
-    
     /** @var array cursor options */
     private $cursorOptions = array();
     
-    /** @var DatabaseInfo */
+    /** @var Phongo\DatabaseInfo */
     private $info;
     
     /** @var array<MongoCollection> */
-    private $collections;
+    private $collections = array();
     
     /** @var string */
     private $namespace;
@@ -71,10 +63,17 @@ class Database extends Object implements IDatabase {
         $this->name = $name;
         ///
         
+        $this->options = $options;
+        
         $this->cursorOptions = array_intersect_key($options, array_flip(
-            array('snapshotMode', 'slaveOkay', 'timeout', 'keepAlive', 'tailable')));
+            array('snapshot', 'slaveOkay', 'timeout', 'keepAlive', 'tailable')));
     }
     
+    
+    /** @return Phongo\Cache */
+    public function getCache() {
+        return $this->connection->getCache();
+    }
     
     /**
      * @return string
@@ -84,34 +83,34 @@ class Database extends Object implements IDatabase {
     }
     
     /** @return array */
-    private function getOptions() {
+    private function getQueryOptions() {
         $options = array();
         if ($this->safeMode) $options['safe']  = version_compare(Mongo::VERSION, '1.0.9', '<') ? TRUE : $this->safeMode;
         if ($this->fileSync) $options['fsync'] = TRUE;
         return $options;
     }
     
+    public function isSafe() {
+        if (isset($this->options['safe'])) return $this->options['safe'];
+        if (isset($this->conn->options['safe'])) return $this->conn->options['safe'];
+        return 0;
+    }
+    
+    public function isFsync() {
+        if (isset($this->options['fsync'])) return $this->options['fsync'];
+        if (isset($this->conn->options['fsync'])) return $this->conn->options['fsync'];
+        return FALSE;
+    }
+    
+    public function isStrict() {
+        if (isset($this->options['strict'])) return $this->options['strict'];
+        if (isset($this->conn->options['strict'])) return $this->conn->options['strict'];
+        return FALSE;
+    }
+    
     /** @return bool */
     public function isSync() {
-        return $this->safeMode || $this->fileSync;
-    }
-    
-    /** @param int */
-    public function setSafeMode($numServers = 1) {
-        $this->safeMode = (int)$numServers;
-        return $this;
-    }
-    
-    /** @param bool */
-    public function setFileSync($fileSync = TRUE) {
-        $this->fileSync = (bool)$fileSync;
-        return $this;
-    }
-    
-    /** @param bool */
-    public function setStrictMode($strictMode = TRUE) {
-        $this->strictMode = (bool)$strictMode;
-        return $this;
+        return $this->isSafe() || $this->isFsync();
     }
     
     /** @return DatabaseInfo */
@@ -133,7 +132,7 @@ class Database extends Object implements IDatabase {
     public function repair($preserveClonedFiles = FALSE, $backupOriginalFiles = FALSE) {
         $this->checkResult($this->database->repair($preserveClonedFiles, $backupOriginalFiles));
         // Anti-WTF:: repair() deletes database if it's empty. re-create if strict mode is set
-        if ($this->strictMode) $this->connection->createDatabase($this->name);
+        if ($this->isStrict()) $this->connection->createDatabase($this->name);
         
         return $this;
     }
@@ -230,7 +229,7 @@ class Database extends Object implements IDatabase {
         if (!Tools::validateCollectionName($collection, TRUE))
             throw new \InvalidArgumentException("Collection name '$collection' is not valid.");
         
-        if ($this->strictMode && !preg_match('/^(local|system|$cmd.sys)\./', $name) && !in_array($name, $this->getInfo()->getCollectionList())) 
+        if ($this->isStrict() && !preg_match('/^(local|system|$cmd.sys)\./', $name) && !in_array($name, $this->getInfo()->getCollectionList())) 
             throw new DatabaseException("Collection '$name' does not exist!");
         
         $this->tempColl = NULL;
@@ -264,7 +263,7 @@ class Database extends Object implements IDatabase {
         
         $cursor = $this->getCollection($collection)->find($query, $fields);
         
-        $class = $this->connection->getCursorClass();
+        $class = $this->connection->cursorClass;
         
         return new $class($cursor, $this->cursorOptions);;
     }
@@ -351,7 +350,7 @@ class Database extends Object implements IDatabase {
      * @return array inserted object
      */
     public function insert($object, $collection = NULL) {
-        $options = $this->getOptions();
+        $options = $this->getQueryOptions();
         if (!is_array($object)) $object = Converter::jsonToMongo($object);
         
         $this->checkResult($this->getCollection($collection)->insert($object, $options), $this->isSync());
@@ -368,7 +367,7 @@ class Database extends Object implements IDatabase {
      * @return array<array> inserted objects
      */
     public function batchInsert($objects, $collection = NULL) {
-        $options = $this->getOptions();
+        $options = $this->getQueryOptions();
         foreach ($objects as $id => $object) {
             if (!is_array($object)) $objects[$id] = Converter::jsonToMongo($object);
         }
@@ -388,7 +387,7 @@ class Database extends Object implements IDatabase {
      * @return array saved object     
      */
     public function save($object, $collection = NULL) {
-        $options = $this->getOptions();
+        $options = $this->getQueryOptions();
         if (!is_array($object)) $object = Converter::jsonToMongo($object);
         
         $this->checkResult($this->getCollection($collection)->save($object, $options), $this->isSync());
@@ -408,7 +407,7 @@ class Database extends Object implements IDatabase {
      * @return integer number of affected items     
      */
     public function update($query, $modifier, $single = FALSE, $upsert = FALSE, $collection = NULL) {
-        $options = $this->getOptions();
+        $options = $this->getQueryOptions();
         if (!$single) $options['multiple'] = 1;
         if ($upsert) $options['upsert'] = 1;
         if (!is_array($query)) $query = Converter::jsonToMongo($query);
@@ -430,7 +429,7 @@ class Database extends Object implements IDatabase {
      * @return integer number of affected items     
      */
     public function delete($query, $single = FALSE, $collection = NULL) {
-        $options = $this->getOptions();
+        $options = $this->getQueryOptions();
         if ($single) $options['justOne'] = 1;
         if (!is_array($query)) $query = Converter::jsonToMongo($query);
         
@@ -466,7 +465,7 @@ class Database extends Object implements IDatabase {
      */
     private function checkResult($result, $type = Phongo::SYNC) {
         // special case when a request may return NULL (no action performed)
-        /// co když je akce provedena? sync? async?
+        /// co když je akce provedena? sync? async? WTF! bug!
         if ($type === Phongo::IGNORE && $result === NULL) return;
         
         if ($type === Phongo::SYNC) {

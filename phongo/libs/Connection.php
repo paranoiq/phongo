@@ -21,7 +21,47 @@ if (version_compare(Mongo::VERSION, '1.0.5', '<'))
 interface IConnection {
     /*
     public function connect();
+    public function database($database);
+    public function __get($name);
     */
+}
+
+abstract class Base extends Object {
+    
+    /** @var string */
+    protected $cursorClass = 'Phongo\Cursor';
+    
+    /** @var array database options */
+    protected $options = array();
+    
+    
+    /** @param string */
+    public function setCursorClass($class) {
+        if (!in_array('Phongo\ICursor', class_implements($class, /*autoload*/TRUE))) 
+            throw new \InvalidArgumentException('Cursor class must implement interface Phongo\ICursor.');
+        
+        $this->cursorClass = $class;
+        return $this;
+    }
+    
+    /** @param int */
+    public function setSafe($numServers = 1) {
+        $this->options['safe'] = (int)$numServers;
+        return $this;
+    }
+    
+    /** @param bool */
+    public function setFsync($fsync = TRUE) {
+        $this->options['fsync'] = (bool)$fsync;
+        return $this;
+    }
+    
+    /** @param bool */
+    public function setStrict($strict = TRUE) {
+        $this->options['strict'] = (bool)$strict;
+        return $this;
+    }
+    
 }
 
 
@@ -32,10 +72,7 @@ interface IConnection {
  * 1.0.9 Added ability to pass integers to "safe" options (only accepted booleans before) and added "fsync" option.
  * $w functionality is only available in version 1.5.1+ of the MongoDB server and 1.0.8+ of the driver
  */
-class Connection extends Object implements IConnection {
-    
-    /** @var string */
-    private $cursorClass = 'Phongo\Cursor';
+class Connection extends Base implements IConnection {
     
     /** @var array */
     private $servers = array();
@@ -50,14 +87,11 @@ class Connection extends Object implements IConnection {
     /** @var array<Phongo\IDatabase> active database drivers */
     private $databases = array();
     
-    /** @var bool */
-    private $strictMode = FALSE;
-    
-    /** @var array database options */
-    private $dbOptions = array();
-    
-    /** @var ConnectionInfo */
+    /** @var Phongo\ConnectionInfo */
     private $info;
+    
+    /** @var Phongo\Cache */
+    protected $cache;
     
     
     /**
@@ -95,60 +129,19 @@ class Connection extends Object implements IConnection {
         
         //$profiler
         unset($options['servers']);
-        $this->dbOptions = $options;
-    }
-    
-    
-    /** @param string */
-    public function setCursorClass($class) {
-        if (!in_array('Phongo\ICursor', class_implements($class, /*autoload*/TRUE))) 
-            throw new \InvalidArgumentException('Cursor class must implement interface Phongo\ICursor.');
-        
-        $this->cursorClass = $class;
-        return $this;
-    }
-    
-    /** @return string */
-    public function getCursorClass() {
-        return $this->cursorClass;
-    }
-    
-    /** @param int */
-    public function setSafeMode($numServers = 1) {
-        $this->dbOptions['safeMode'] = $numServers = (int)$numServers;
-        foreach ($this->databases as $db) {
-            $db->setSafeMode($numServers);
-        }
-        return $this;
-    }
-    
-    /** @param bool */
-    public function setFileSync($fileSync = TRUE) {
-        $this->dbOptions['fileSync'] = $fileSync = (bool)$fileSync;
-        foreach ($this->databases as $db) {
-            $db->setFileSync($fileSync);
-        }
-        return $this;
-    }
-    
-    /** @param bool */
-    public function setStrictMode($strictMode = TRUE) {
-        $this->dbOptions['strictMode'] = $strictMode = (bool)$strictMode;
-        foreach ($this->databases as $db) {
-            $db->setStrictMode($strictMode);
-        }
-        return $this;
-    }
-    
-    /** @return array */
-    public function getServers() {
-        return $this->servers;
+        $this->options = $options;
     }
     
     /** @return DatabaseInfo */
     public function getInfo() {
         if (!$this->info) $this->info = new ConnectionInfo($this);
         return $this->info;
+    }
+    
+    /** @return Phongo\Cache */
+    public function getCache() {
+        if (!$this->cache) $this->cache = new Cache;
+        return $this->cache;
     }
     
     
@@ -183,6 +176,11 @@ class Connection extends Object implements IConnection {
     // logout
     
     // ping
+    
+    /** @return array */
+    public function getServers() {
+        return $this->servers;
+    }
     
     /** @return bool */
     public function isMaster() {
@@ -220,13 +218,13 @@ class Connection extends Object implements IConnection {
      * @param bool
      */
     public function database($database) {
-        if ($this->strictMode && !is_null($database) && !in_array($database, $this->getDatabaseList())) 
+        if (!empty($this->options['strict']) && !is_null($database) && !in_array($database, $this->getDatabaseList())) 
             throw new DatabaseException("Database '$database' is not created!");
         
         if (!Tools::validateDatabaseName($database))
             throw new \InvalidArgumentException("Database name '$database' is not valid.");
         
-        $db = new Database($this, $this->mongo->selectDB($database), $database, $this->dbOptions);
+        $db = new Database($this, $this->mongo->selectDB($database), $database, $this->options);
         $this->databases[$database] = $db;
         return $db;
     }

@@ -6,32 +6,17 @@ namespace Phongo;
 class ConnectionInfo extends Object {
     
     /** @var IConnection */
-    private $db;
-    
-    /** @var array metadata cache */
-    private $cache = array();
-    /** @var bool */
-    private $useCache = FALSE;
+    private $conn;
     
     
     public function __construct(IConnection $connection) {
-        $this->db = $connection;
-    }
-    
-    
-    /**
-     * @param bool
-     * @return ConnectionInfo
-     */
-    public function useCache($useCache = TRUE) {
-        $this->useCache = (bool) $useCache;
-        return $this;
+        $this->conn = $connection;
     }
     
     
     /** @return string */
     public function getServerInfo() {
-        return $this->db->admin->runCommand(array('buildInfo' => 1));
+        return $this->conn->admin->runCommand(array('buildInfo' => 1));
     }
     
     /** @return string */
@@ -46,38 +31,35 @@ class ConnectionInfo extends Object {
     
     /** @return array */
     public function getStartupOptions() {
-        $options = $this->db->admin->runCommand(array('getCmdLineOpts' => 1));
+        $options = $this->conn->admin->runCommand(array('getCmdLineOpts' => 1));
         return $options['argv'];
     }
     
     /** @return array */
     public function getServerStatus() {
         /// fuj
-        $status = Converter::mongoToPhongo($this->db->admin->runCommand(array('serverStatus' => 1)));
+        $status = Converter::mongoToPhongo($this->conn->admin->runCommand(array('serverStatus' => 1)));
         unset($status['ok']);
         return $status;
     }
     
     /** @return array */
     public function getCommandList() {
-        if ($this->useCache && !empty($this->cache['commands'])) return $this->cache['commands'];
-        
-        $stats = $this->db->admin->runCommand(array('listCommands' => 1));
-        
-        $this->cache['commands'] = $stats['commands'];
+        $stats = $this->conn->admin->runCommand(array('listCommands' => 1));
         return $stats['commands'];
     }
     
     /** @return array */
     private function getDatabaseInfo() {
-        $info = $this->db->admin->runCommand(array('listDatabases' => 1));
+        $info = $this->conn->admin->runCommand(array('listDatabases' => 1));
         unset($info['ok']);
         return $info;
     }
     
     /** @return array */
     public function getDatabaseList() {
-        if ($this->useCache && !empty($this->cache['databases'])) return $this->cache['databases'];
+        $res = $this->conn->getCache()->get('databases', Cache::RUNTIME);
+        if ($res) return $res;
         
         $result = $this->getDatabaseInfo();
         $list = array();
@@ -85,13 +67,13 @@ class ConnectionInfo extends Object {
             $list[$database['name']] = $database['name'];
         }
         
-        $this->cache['databases'] = $list;
+        $this->conn->getCache()->set('databases', $list, Cache::RUNTIME);
         return $list;
     }
     
     /** @return array */
     public function getCollectionsUsage() {
-        $usage = $this->db->admin->runCommand(array('top' => 1));
+        $usage = $this->conn->admin->runCommand(array('top' => 1));
         return $usage['totals'];
     }
     

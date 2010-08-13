@@ -8,24 +8,9 @@ class DatabaseInfo extends Object {
     /** @var IDatabase */
     private $db;
     
-    /** @var array metadata cache */
-    private $cache = array();
-    /** @var bool */
-    private $useCache = FALSE;
-    
     
     public function __construct(IDatabase $database) {
         $this->db = $database;
-    }
-    
-    
-    /**
-     * @param bool
-     * @return DatabaseInfo
-     */
-    public function useCache($useCache = TRUE) {
-        $this->useCache = (bool) $useCache;
-        return $this;
     }
     
     
@@ -38,8 +23,13 @@ class DatabaseInfo extends Object {
     
     /** @return array<array> */
     private function getNamespaces() {
-        $cursor = $this->db->find(array(), array(), 'system.namespaces')->orderBy(array('name' => 1));
-        return $cursor->fetchAll();
+        $res = $this->db->getCache()->get('namespaces', Cache::RUNTIME);
+        if ($res) return $res;
+        
+        $list = $this->db->find(array(), array(), 'system.namespaces')->order(array('name' => 1))->fetchAll();
+        
+        $this->db->getCache()->set('namespaces', $list, Cache::RUNTIME);
+        return $list;
     }
     
     /** @return array */
@@ -80,7 +70,7 @@ class DatabaseInfo extends Object {
      */
     public function getIndexList($collection = NULL) {
         $namespace = $this->db->getName() . '.' . ($collection ?: $this->db->getCollectionName());
-        $cursor = $this->db->find(array('ns' => $namespace), array(), 'system.indexes')->orderBy(array('name' => 1));
+        $cursor = $this->db->find(array('ns' => $namespace), array(), 'system.indexes')->order(array('name' => 1));
         $indexes = array();
         while ($index = $cursor->fetch()) {
             $keys = implode(',', array_keys($index['key']));
