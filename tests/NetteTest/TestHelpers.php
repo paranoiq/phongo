@@ -282,7 +282,7 @@ class TestHelpers
 	{
 		$file = __DIR__ . '/coverage.tmp';
 		$coverage = @unserialize(file_get_contents($file));
-		$root = realpath(__DIR__ . '/../../Nette') . DIRECTORY_SEPARATOR;
+		$root = realpath(__DIR__ . '/../../phongo') . DIRECTORY_SEPARATOR;
 
 		foreach (xdebug_get_code_coverage() as $filename => $lines) {
 			if (strncmp($root, $filename, strlen($root))) continue;

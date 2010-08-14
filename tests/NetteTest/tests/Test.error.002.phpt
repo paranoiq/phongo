@@ -20,5 +20,5 @@ require __DIR__ . '/initialize.php';
 __halt_compiler() ?>
 
 ------EXPECT------
-<br />
-<b>Parse error</b>:  syntax error, unexpected ';' in <b>%a%Test.error.002.phpt</b> on line <b>16</b><br />
+
+Parse error: syntax error, unexpected ';' in %a%Test.error.002.phpt on line 16
