@@ -6,11 +6,11 @@ use MongoCursor;
 use InvalidStateException;
 
 
-interface ICursor {
+interface ICursor extends \Countable {
     public function __construct(MongoCursor $cursor, $options = array());
-    public function orderBy($keys);
-    public function setLimit($limit, $offset = 0);
-    public function setOffset($offset);
+    public function order($keys);
+    public function limit($limit, $offset = 0);
+    public function offset($offset);
     public function fetch();
     public function fetchAll();
 }
@@ -67,7 +67,7 @@ class Cursor extends Object implements ICursor {
      * @param array
      * @return self
      */
-    public function orderBy($keys) {
+    public function order($keys) {
         $this->cursor->sort($keys);
         return $this;
     }
@@ -77,7 +77,7 @@ class Cursor extends Object implements ICursor {
      * @param integer
      * @return self
      */
-    public function setLimit($limit, $offset = 0) {
+    public function limit($limit, $offset = 0) {
         $this->cursor->limit($limit);
         if ($offset) $this->offset($offset);
         return $this;
@@ -87,7 +87,7 @@ class Cursor extends Object implements ICursor {
      * @param integer
      * @return self
      */
-    public function setOffset($offset) {
+    public function offset($offset) {
         $this->cursor->skip($offset);
         return $this;
     }
