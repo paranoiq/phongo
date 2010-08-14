@@ -224,7 +224,7 @@ class Connection extends Base implements IConnection {
         if (!Tools::validateDatabaseName($database))
             throw new \InvalidArgumentException("Database name '$database' is not valid.");
         
-        $db = new Database($this, $this->mongo->selectDB($database), $database, $this->options);
+        $db = new Database($this, $this->mongo->selectDB($database), $this->options);
         $this->databases[$database] = $db;
         return $db;
     }
@@ -241,7 +241,6 @@ class Connection extends Base implements IConnection {
     /** @param string */
     public function releaseDatabase($database) {
         unset($this->databases[$database]);
-        
         return $this;
     }
     

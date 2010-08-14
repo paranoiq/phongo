@@ -2,6 +2,7 @@
 
 namespace Phongo;
 
+use Mongo;
 use MongoDB;
 use MongoCollection;
 use MongoDBRef;
@@ -29,6 +30,7 @@ class Database extends Base implements IDatabase {
     
     /** @var MongoDB */
     private $database;
+    // DO NOT USE DIRECTLY! call $this->getName()
     /** @var string */
     private $name;
     
@@ -57,10 +59,9 @@ class Database extends Base implements IDatabase {
      * @param string
      * @param array
      */
-    public function __construct(IConnection $connection, MongoDB $database, $name, $options = array()) {
+    public function __construct(IConnection $connection, MongoDB $database, $options = array()) {
         $this->connection = $connection;
         $this->database = $database;
-        $this->name = $name;
         ///
         
         $this->options = $options;
@@ -69,6 +70,11 @@ class Database extends Base implements IDatabase {
             array('snapshot', 'slaveOkay', 'timeout', 'keepAlive', 'tailable')));
     }
     
+    
+    /** @return Phongo\Connection */
+    public function getConnection() {
+        return $this->connection;
+    }
     
     /** @return Phongo\Cache */
     public function getCache() {
@@ -79,38 +85,43 @@ class Database extends Base implements IDatabase {
      * @return string
      */
     public function getName() {
+        if (!isset($this->name)) {
+            // MongoDB does not provide database name :[
+            $ns = $this->findOne(array(), array(), 'system.namespaces');
+            $this->name = substr($ns['name'], 0, strpos($ns['name'], '.'));
+        }
         return $this->name;
-    }
-    
-    /** @return array */
-    private function getQueryOptions() {
-        $options = array();
-        if ($this->safeMode) $options['safe']  = version_compare(Mongo::VERSION, '1.0.9', '<') ? TRUE : $this->safeMode;
-        if ($this->fileSync) $options['fsync'] = TRUE;
-        return $options;
     }
     
     public function isSafe() {
         if (isset($this->options['safe'])) return $this->options['safe'];
-        if (isset($this->conn->options['safe'])) return $this->conn->options['safe'];
+        if (isset($this->connection->options['safe'])) return $this->connection->options['safe'];
         return 0;
     }
     
     public function isFsync() {
         if (isset($this->options['fsync'])) return $this->options['fsync'];
-        if (isset($this->conn->options['fsync'])) return $this->conn->options['fsync'];
+        if (isset($this->connection->options['fsync'])) return $this->connection->options['fsync'];
         return FALSE;
     }
     
     public function isStrict() {
         if (isset($this->options['strict'])) return $this->options['strict'];
-        if (isset($this->conn->options['strict'])) return $this->conn->options['strict'];
+        if (isset($this->connection->options['strict'])) return $this->connection->options['strict'];
         return FALSE;
     }
     
     /** @return bool */
     public function isSync() {
         return $this->isSafe() || $this->isFsync();
+    }
+    
+    /** @return array */
+    private function getQueryOptions() {
+        $options = array();
+        if ($this->isSafe()) $options['safe']  = version_compare(Mongo::VERSION, '1.0.9', '<') ? TRUE : $this->isSafe();
+        if ($this->isFsync()) $options['fsync'] = TRUE;
+        return $options;
     }
     
     /** @return DatabaseInfo */
@@ -122,7 +133,7 @@ class Database extends Base implements IDatabase {
     
     public function drop() {
         $this->checkResult($this->database->drop());
-        $this->connection->releaseDatabase($this->name);
+        $this->connection->releaseDatabase($this->getName());
     }
     
     /**
@@ -132,7 +143,7 @@ class Database extends Base implements IDatabase {
     public function repair($preserveClonedFiles = FALSE, $backupOriginalFiles = FALSE) {
         $this->checkResult($this->database->repair($preserveClonedFiles, $backupOriginalFiles));
         // Anti-WTF:: repair() deletes database if it's empty. re-create if strict mode is set
-        if ($this->isStrict()) $this->connection->createDatabase($this->name);
+        if ($this->isStrict()) $this->connection->createDatabase($this->getName());
         
         return $this;
     }
@@ -301,7 +312,7 @@ class Database extends Base implements IDatabase {
             $result = MongoDBRef::get($this->database, $reference);
         } elseif (is_string($reference) && strlen($reference) == 24) {
             $collName = $this->determineCollectionName($collection);
-            $ref = MongoDBRef::create($collName, $reference, $this->name);
+            $ref = MongoDBRef::create($collName, $reference, $this->getName());
             $result = MongoDBRef::get($this->database, $ref);
         } else {
             throw new \InvalidArgumentException('Invalid database reference.');
@@ -336,7 +347,7 @@ class Database extends Base implements IDatabase {
      * @return int
      */
     public function size($query = array(), $collection = NULL) {
-        $namespace = $this->name . '.' . $this->getCollection($collection)->getName();
+        $namespace = $this->getName() . '.' . $this->getCollection($collection)->getName();
         /// query
         return $this->runCommand(array('dataSize' => $namespace));
     }
@@ -494,28 +505,27 @@ class Database extends Base implements IDatabase {
     
     /**
      * @param string
-     * @param bool
-     * @param integer
-     * @param integer               
+     * @param array options (capped, size, max, autoIndexId)
+     * - capped: bool, fixed size collection
+     * - size: integer, prealocated space for collection (maximal size for capped collection)
+     * - max: integer, maximum number of items in capped collection
+     * - autoIndexId: bool, create automatic index on key `_id` (default is TRUE)
      */
-    public function createCollection($collection, $capped = FALSE, $size = 0, $maxItems = 0) {
+    public function createCollection($collection, $options = array()) {
         if (!Tools::validateCollectionName($collection))
             throw new \InvalidArgumentException("Collection name '$collection' is not valid.");
         
-        $collection = $this->database->createCollection($collection, $capped, $size, $maxItems);
-        if ($collection instanceof MongoCollection) {
-            $this->collection = $collection->getName();
-            $this->collections[$this->collection] = $collection;
-        } else {
-            $this->checkResult($collection);
-        }
+        $query = array_merge(array('create' => $collection), $options);
+        
+        $this->checkResult($this->runCommand($query));
+        $this->collection = $collection;
         
         return $this;
     }
     
     /**
      * @param string
-     * @param bool     
+     * @param bool
      */
     public function validateCollection($collection = NULL, $validateData = FALSE) {
         $this->checkResult($this->getCollection($collection)->validate($validateData = FALSE));
@@ -544,8 +554,8 @@ class Database extends Base implements IDatabase {
      * @param string
      */
     public function renameCollection($newCollection, $newDatabase = NULL, $collection = NULL) {
-        $old = $this->name . '.' . $this->getCollection($collection)->getName();
-        $new = ($newDatabase ?: $this->name) . '.' . $newCollection;
+        $old = $this->getName() . '.' . $this->getCollection($collection)->getName();
+        $new = ($newDatabase ?: $this->getName()) . '.' . $newCollection;
         
         $this->connection->database('admin')->runCommand(array('renameCollection' => $old, 'to' => $new));
         

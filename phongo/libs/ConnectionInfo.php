@@ -72,8 +72,13 @@ class ConnectionInfo extends Object {
     }
     
     /** @return array */
-    public function getCollectionsUsage() {
-        $usage = $this->conn->admin->runCommand(array('top' => 1));
+    public function getUsage() {
+        $usage = $this->conn->getCache()->get('usage', Cache::RUNTIME);
+        if (!$usage) {
+            $usage = $this->conn->admin->runCommand(array('top' => 1));
+            $this->conn->getCache()->set('usage', $usage, Cache::RUNTIME);
+        }
+        
         return $usage['totals'];
     }
     

@@ -90,4 +90,16 @@ class DatabaseInfo extends Object {
         return $stats;
     }
     
+    /**
+     * @param string    
+     * @return array
+     */
+    public function getUsage($collection = NULL) {
+        $usage = $this->db->getConnection()->getInfo()->getUsage();
+        if (!isset($collection)) return $usage[$this->db->getName()];
+        //dump($usage);
+        //exit;
+        return $usage[$this->db->getName() . '.' . $collection];
+    }
+    
 }

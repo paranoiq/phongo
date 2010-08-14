@@ -142,7 +142,7 @@ class MongoCache extends Object implements ICacheStorage {
     }
     
     public function get($key) {
-        $result = $this->collection('PhongoCache')->findOne(array('id' => $key));
+        $result = $this->findOne(array('id' => $key), array(), 'PhongoCache');
         if (!$result) return NULL;
         
         if (isset($result['expires']) && $result['expires'] < time()) {
@@ -157,11 +157,11 @@ class MongoCache extends Object implements ICacheStorage {
         $data = array('id' => $key, 'data' => serialize($value));
         if ($lifetime) $data['expires'] = time() + $lifetime;
         
-        $this->db->collection('PhongoCache')->save($data);
+        $this->db->save($data, 'PhongoCache');
     }
     
     public function remove($key) {
-        $this->db->collection('PhongoCache')->delete(array('id' => $key));
+        $this->db->delete(array('id' => $key), 'PhongoCache');
     }
     
 }
