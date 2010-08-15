@@ -1,8 +1,10 @@
 
-Phongo - low level database layer for MongoDB
+Phongo - database layer for MongoDB
+===================================
 
+author: Vlasta Neubauer [@paranoiq]
 
-author: @paranoiq
+source: http://github.com/paranoiq/phongo
 
 
 requirements:
