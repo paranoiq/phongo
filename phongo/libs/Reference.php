@@ -3,6 +3,13 @@
 namespace Phongo;
 
 
+/**
+ * MongoDB object reference wrapper
+ * 
+ * @property-read id
+ * @property-read collection
+ * @property-read database
+ */
 class Reference extends Object {
     
     private $id;
@@ -28,11 +35,32 @@ class Reference extends Object {
     }
     
     /**
-     * @param Phongo\Connection
+     * @param Phongo\Connection|Phongo\Database
      * @return array
      */
-    public function getFrom(IConnection $connection) {
-        $collection->get($this);
+    public function getObjectFrom($resource) {
+        return $resource->get($this);
+    }
+    
+    /**
+     * @return string
+     */   
+    public function getDatabase() {
+        return $this->database;
+    }
+    
+    /**
+     * @return string
+     */   
+    public function getCollection() {
+        return $this->collection;
+    }
+    
+    /**
+     * @return string
+     */   
+    public function getId() {
+        return $this->id;
     }
     
 }

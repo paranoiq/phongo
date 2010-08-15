@@ -5,26 +5,66 @@ namespace Phongo;
 use Mongo;
 use MongoConnectionException;
 
-use InvalidStateException;
-use InvalidArgumentException;
-
 
 // check PHP version
 if (version_compare(PHP_VERSION, '5.3.0', '<')) 
-	throw new Exception('Phongo needs PHP 5.3.0 or newer.');
+	throw new \Exception('Phongo needs PHP 5.3.0 or newer.');
 // check Mongo extension
 if (!class_exists('Mongo'))
-    throw new Exception('Mongo extension for PHP is not installed.');
+    throw new \Exception('Mongo extension for PHP is not installed.');
 // check Mongo extension version
 if (version_compare(Mongo::VERSION, '1.0.5', '<')) 
-	throw new Exception('Phongo needs Mongo extension 1.0.5 or newer.');
+	throw new \Exception('Phongo needs Mongo extension 1.0.5 or newer.');
 
 
 /** formal Connection interface */
 interface IConnection {
     /*
     public function connect();
+    public function database($database);
+    public function __get($name);
     */
+}
+
+abstract class Base extends Object {
+    
+    /** @var Mongo */
+    protected $mongo;
+    
+    /** @var string */
+    protected $cursorClass = 'Phongo\Cursor';
+    
+    /** @var array database options */
+    protected $options = array();
+    
+    
+    /** @param string */
+    public function setCursorClass($class) {
+        if (!in_array('Phongo\ICursor', class_implements($class, /*autoload*/TRUE))) 
+            throw new \InvalidArgumentException('Cursor class must implement interface Phongo\ICursor.');
+        
+        $this->cursorClass = $class;
+        return $this;
+    }
+    
+    /** @param int */
+    public function setSafe($numServers = 1) {
+        $this->options['safe'] = (int)$numServers;
+        return $this;
+    }
+    
+    /** @param bool */
+    public function setFsync($fsync = TRUE) {
+        $this->options['fsync'] = (bool)$fsync;
+        return $this;
+    }
+    
+    /** @param bool */
+    public function setStrict($strict = TRUE) {
+        $this->options['strict'] = (bool)$strict;
+        return $this;
+    }
+    
 }
 
 
@@ -35,11 +75,10 @@ interface IConnection {
  * 1.0.9 Added ability to pass integers to "safe" options (only accepted booleans before) and added "fsync" option.
  * $w functionality is only available in version 1.5.1+ of the MongoDB server and 1.0.8+ of the driver
  */
-class Connection extends Object implements IConnection {
+class Connection extends Base implements IConnection {
     
-    /** @var string */
-    private $cursorClass = 'Phongo\Cursor';
-    
+    /** @var bool*/
+    private $connected = FALSE;
     /** @var array */
     private $servers = array();
     /** @var string */
@@ -47,24 +86,16 @@ class Connection extends Object implements IConnection {
     /** @var string */
     private $password;
     
-    /** @var Mongo */
-    private $mongo;
-    
     /** @var array<Phongo\IDatabase> active database drivers */
     private $databases = array();
-    /** @var string name of selected database */
-    private $selected;
     
-    /** @var bool */
-    private $strictMode = FALSE;
-    
-    /** @var array database options */
-    private $dbOptions = array();
-    
-    /** @var ConnectionInfo */
+    /** @var Phongo\ConnectionInfo */
     private $info;
     
-    /** @var Profiler */
+    /** @var Phongo\Cache */
+    private $cache;
+    
+    /** @var Phongo\Profiler */
     private $profiler;
     
     
@@ -104,73 +135,40 @@ class Connection extends Object implements IConnection {
         //$profiler
         
         unset($options['servers']);
-        $this->dbOptions = $options;
+        $this->options = $options;
     }
     
     
-    /** @param string */
-    public function setCursorClass($class) {
-        if (!in_array('Phongo\ICursor', class_implements($class, /*autoload*/TRUE))) 
-            throw new InvalidArgumentException('Cursor class must implement interface Phongo\ICursor.');
-        
-        $this->cursorClass = $class;
-        return $this;
-    }
-    
-    /** @return string */
-    public function getCursorClass() {
-        return $this->cursorClass;
-    }
-    
-    /** @param int */
-    public function setSafeMode($numServers = 1) {
-        $this->dbOptions['safeMode'] = $numServers = (int)$numServers;
-        foreach ($this->databases as $db) {
-            $db->setSafeMode($numServers);
-        }
-        return $this;
-    }
-    
-    /** @param bool */
-    public function setFileSync($fileSync = TRUE) {
-        $this->dbOptions['fileSync'] = $fileSync = (bool)$fileSync;
-        foreach ($this->databases as $db) {
-            $db->setFileSync($fileSync);
-        }
-        return $this;
-    }
-    
-    /** @param bool */
-    public function setStrictMode($strictMode = TRUE) {
-        $this->dbOptions['strictMode'] = $strictMode = (bool)$strictMode;
-        foreach ($this->databases as $db) {
-            $db->setStrictMode($strictMode);
-        }
-        return $this;
-    }
-    
-    /** @return array */
-    public function getServers() {
-        return $this->servers;
-    }
-    
-    /** @return DatabaseInfo */
+    /** @return Phongo\DatabaseInfo */
     public function getInfo() {
         if (!$this->info) $this->info = new ConnectionInfo($this);
         return $this->info;
     }
     
-    /** @return Profiler */
+    /** @return Phongo\Cache */
+    public function getCache() {
+        if (!$this->cache) $this->cache = new Cache;
+        return $this->cache;
+    }
+    
+    /** @return Phongo\IProfiler */
     public function getProfiler() {
-        if (!$this->profiler) $this->profiler = new Profiler();
         return $this->profiler;
     }
+    
+    /** @param Phongo\IProfiler */
+    public function setProfiler(IProfiler $profiler) {
+        $this->profiler = $profiler;
+    }
+    
     
     // -- CONNECTION ---------------------------------------------------------------------------------------------------
     
     
     /** @return bool */
     public function connect() {
+        if ($this->connected) return $this;
+        
         $dsn = 'mongodb://';
         $dsn .= implode(',', $this->servers);
         if ($this->username) {
@@ -179,12 +177,16 @@ class Connection extends Object implements IConnection {
             $dsn .= '@';
         }
         
+        if ($this->profiler) $ticket = $this->profiler->before($this, IProfiler::CONNECT);
+        
         try {
             $this->mongo = new Mongo($dsn, array("connect" => TRUE));
             $this->mongo->connect();
 		} catch (MongoConnectionException $e) {
             throw new DatabaseException($e->getMessage(), $dsn);
         }
+        
+        if (isset($ticket)) $this->profiler->after($ticket);
         
         return $this;
     }
@@ -198,69 +200,56 @@ class Connection extends Object implements IConnection {
     
     // ping
     
+    /** @return array */
+    public function getServers() {
+        return $this->servers;
+    }
+    
     /** @return bool */
     public function isMaster() {
-        $result = $this->getDatabase('admin')->runCommand(array('isMaster' => 1));
+        $result = $this->database('admin')->runCommand(array('isMaster' => 1));
         return (bool)$result['ismaster'];
     }
     
     /** @param array */
     public function shutdownServer() {
-        return $this->getDatabase('admin')->runCommand(array('shutdown' => 1));
+        return $this->database('admin')->runCommand(array('shutdown' => 1));
     }
     
     /** @param array */
     public function lockWrite() {
-        return $this->getDatabase('admin')->runCommand(array('fsync' => 1, 'lock' => 1));
+        return $this->database('admin')->runCommand(array('fsync' => 1, 'lock' => 1));
     }
     
     /** @param array */
     public function unlockWrite() {
-        return $this->getDatabase('admin')->findOne(array(), array(), '$cmd.sys.unlock');
+        return $this->database('admin')->findOne(array(), array(), '$cmd.sys.unlock');
     }
     
     /** @return bool */
     public function isLocked() {
-        $result = $this->getDatabase('admin')->findOne(array(), array(), '$cmd.sys.inprog');
+        $result = $this->database('admin')->findOne(array(), array(), '$cmd.sys.inprog');
         return !empty($result['fsyncLock']);
     }
     
-    /** @return array<array> */
-    public function getOperationList() {
-        $result = $this->getDatabase('admin')->findOne(array('$all' => 1), array(), '$cmd.sys.inprog');
-        return $result['inprog'];
-    }
     
-    /** @return array */
-    public function terminateOperation($operationId) {
-        return $this->getDatabase('admin')->findOne(array('op' => (int)$operationId), array(), '$cmd.sys.killop');
-    }
-    
-    
-    // -- RESOURCES ----------------------------------------------------------------------------------------------------
+    // -- DATABASES ----------------------------------------------------------------------------------------------------
     
     
     /**
      * @param string
      * @param bool
      */
-    public function getDatabase($database = NULL) {
-        if ($this->strictMode && !is_null($database) && !in_array($database, $this->getDatabaseList())) 
-            throw new StructureException("Database '$database' is not created!");
+    public function database($database) {
+        if (!empty($this->options['strict']) && !is_null($database) && !in_array($database, $this->getDatabaseList())) 
+            throw new DatabaseException("Database '$database' is not created!");
         
-        if (!is_null($database)) {
-            if (!preg_match("/^[-!#%&'()+,0-9;>=<@A-Z\[\]^_`a-z{}~]+$/", $database))
-                throw new InvalidArgumentException('Invalid character in database name.');
-            
-            $db = new Database($this, $this->mongo->selectDB($database), $database, $this->dbOptions);
-            $this->databases[$database] = $db;
-            return $db;
-        }
+        if (!Tools::validateDatabaseName($database))
+            throw new \InvalidArgumentException("Database name '$database' is not valid.");
         
-        if (isset($this->databases[$this->selected])) 
-            return $this->databases[$this->selected];
-        
-        throw new InvalidStateException('No database selected!');
+        $db = new Database($this, $this->mongo->selectDB($database), $this->options);
+        $this->databases[$database] = $db;
+        return $db;
     }
     
     /**
@@ -268,58 +257,51 @@ class Connection extends Object implements IConnection {
      * @return Phongo\IDatabase
      */
     public function &__get($name) {
-        $db = $this->getDatabase($name);
+        $db = $this->database($name);
         return $db;
-    }
-    
-    
-    // -- DATABASES ----------------------------------------------------------------------------------------------------
-    
-    
-    /** @param string */
-    public function selectDatabase($database) {
-        if (!isset($this->databases[$database])) {
-            $this->databases[$database] = $this->getDatabase($database);
-        }
-        $this->selected = $database;
-        
-        return $this;
     }
     
     /** @param string */
     public function releaseDatabase($database) {
         unset($this->databases[$database]);
-        
         return $this;
     }
     
     /** @param string */
     public function createDatabase($database) {
+        if (!Tools::validateDatabaseName($database))
+            throw new \InvalidArgumentException("Database name '$database' is not valid.");
+        
         // Anti-WTF: empty database can be created only by writing to it
-        $db = $this->getDatabase($database);
+        $db = $this->database($database);
         $db->runCommand(array('create' => 'tristatricettristribrnychstrikacek'));
         $db->runCommand(array('drop'   => 'tristatricettristribrnychstrikacek'));
         
-        $this->selected = $database;
-        
         return $this;
     }
     
     
-    // -- PROCESSES ----------------------------------------------------------------------------------------------------
+    // -- OTHER --------------------------------------------------------------------------------------------------------
+    
+    
+    /**
+     * @param Phongo\Reference
+     * @return array
+     */
+    public function get(Reference $ref) {
+        return $this->getDatabase($ref->database)->get($ref);
+    }
     
     
     /** @return array<array> */
-    public function getProcessList() {
-        $list = $this->getDatabase('admin')->findOne(array(), array(), '$cmd.sys.inprog');
-        return $list['inprog'];
+    public function getProcessList($all = FALSE) {
+        $result = $this->database('admin')->findOne(array('$all' => $all ? 1 : 0), array(), '$cmd.sys.inprog');
+        return $result['inprog'];
     }
     
-    
+    /** @return array */
     public function terminateProcess($processId) {
-        $this->getDatabase('admin')->findOne(array(), array(), '$cmd.sys.killop');
-        
-        return $this;
+        return $this->database('admin')->findOne(array('op' => (int)$processId), array(), '$cmd.sys.killop');
     }
     
 }

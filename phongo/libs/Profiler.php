@@ -2,45 +2,50 @@
 
 namespace Phongo;
 
+use Nette\Debug;
 use Nette\IDebugPanel;
+
 
 /**
  * Defines method that must profiler implement.
  */
 interface IProfiler {
     /**#@+ event type */
-    const CONNECT = 1; // connect
-    const SELECT = 4;  // query
-    const INSERT = 8;  // insert, batchInsert
-    const DELETE = 16; // delete
-    const UPDATE = 32; // update, save
-    const QUERY = 60;  // 
-    const COMMAND = 64; // runCommand
+    const CONNECT =  1; // connect
+    const GET     =  2; // get
+    const FIND    =  4; // find
+    const FINDONE =  8; // findOne
+    const INSERT  = 16; // insert, batchInsert
+    const SAVE    = 32; // save
+    const UPDATE  = 64; // update
+    const DELETE  = 128; // delete
+    const COMMAND = 256; // runCommand
+    const QUERY   = 511;
     const EXCEPTION = 512;
     const ALL = 1023;
     /**#@-*/
     
     /**
      * Before event notification.
-     * @param  Phongo\Phongo
+     * @param  Phongo\Connection|Phongo\Database
      * @param  int     event type
      * @param  string  query
      * @return int
      */
-    function before(IConnection $connection, $event, $query = NULL);
+    public function before($connection, $event, $namespace = NULL, $query = NULL);
     
     /**
      * After event notification.
      * @param  int
-     * @param  Phongo\Query
+     * @param  Phongo\Cursor|int
      */
-    function after($ticket, $result = NULL);
+    public function after($ticket, $result = NULL);
     
     /**
      * After exception notification.
      * @param  Phongo\DatabaseException
      */
-    function exception(DatabaseException $exception);
+    public function exception(DatabaseException $exception);
     
 }
 
@@ -84,9 +89,23 @@ class Profiler extends Object implements IProfiler, IDebugPanel {
     /** @var int */
     private static $totalTime = 0;
     
+    
+    private static $types = array(
+        self::CONNECT => 'connect',
+        self::GET     => 'get',
+        self::FIND    => 'find',
+        self::FINDONE => 'findOne',
+        self::INSERT  => 'insert',
+        self::SAVE    => 'save',
+        self::UPDATE  => 'update',
+        self::DELETE  => 'delete',
+        self::COMMAND => 'command',
+    );
+    
+    
     public function __construct(array $config = array()) {
         if (class_exists('Nette\Debug', FALSE) && is_callable('Nette\Debug::addPanel')) {
-            Nette\Debug::addPanel($this);
+            Debug::addPanel($this);
         }
         
         $this->useFirebug = isset($_SERVER['HTTP_USER_AGENT']) && strpos($_SERVER['HTTP_USER_AGENT'], 'FirePHP/');
@@ -131,10 +150,12 @@ class Profiler extends Object implements IProfiler, IDebugPanel {
      * @param  string  query
      * @return int
      */
-    public function before(IConnection $connection, $event, $query = NULL) {
-        if ($event & self::QUERY) self::numOfQueries++;
+    public function before($connection, $event, $namespace = NULL, $query = NULL) {
+        if (!is_string($query) && !is_null($query)) $query = Json::encode($query);
+        
+        if ($event & self::QUERY) self::$numOfQueries++;
         self::$elapsedTime = FALSE;
-        self::$tickets[] = array($connection, $event, trim($query), -microtime(TRUE), NULL, NULL);
+        self::$tickets[] = array($connection, $event, $namespace, $query, -microtime(TRUE), NULL, NULL);
         end(self::$tickets);
         return key(self::$tickets);
     }
@@ -144,17 +165,17 @@ class Profiler extends Object implements IProfiler, IDebugPanel {
     /**
      * After event notification.
      * @param  int
-     * @param  Phongo/ICursor
+     * @param  Phongo/ICursor|int
      * @return void
      */
-    public function after($ticket, ICursor $res = NULL) {
+    public function after($ticket, $result = NULL) {
         if (!isset(self::$tickets[$ticket])) {
             throw new InvalidArgumentException('Bad ticket number.');
         }
         
         $ticket = & self::$tickets[$ticket];
-        $ticket[3] += microtime(TRUE);
-        list($connection, $event, $query, $time) = $ticket;
+        $ticket[4] += microtime(TRUE);
+        list($connection, $event, $namespace, $query, $time) = $ticket;
         
         self::$elapsedTime = $time;
         self::$totalTime += $time;
@@ -163,7 +184,7 @@ class Profiler extends Object implements IProfiler, IDebugPanel {
         
         if ($event & self::QUERY) {
             try {
-                $ticket[4] = $count = $res instanceof ICursor ? $res->count(TRUE) : '-';
+                $ticket[5] = $count = $result instanceof ICursor ? $result->count(TRUE) : (is_int($result) ? $result : '-');
             } catch (Exception $e) {
                 $count = '?';
             }
@@ -171,16 +192,17 @@ class Profiler extends Object implements IProfiler, IDebugPanel {
             if (count(self::$fireTable) < self::$maxQueries) {
                 self::$fireTable[] = array(
                     sprintf('%0.3f', $time * 1000),
+                    self::$types[$event],
+                    $namespace,
                     strlen($query) > self::$maxLength ? substr($query, 0, self::$maxLength) . '...' : $query,
                     $count,
                     'MongoDB' /*. '/' . $connection->getConfig('name')*/
                 );
                 
-                if ($this->explainQuery && $event === self::SELECT) {
+                if ($this->explainQuery && $event === self::FIND) {
                     try {
-                        $ticket[5] = $res->explain();
+                        $ticket[6] = Json::encode($result->explain(TRUE));
                     } catch (DatabaseException $e) {}
-                    $connection->setProfiler($this);
                 }
                 
                 if ($this->useFirebug && !headers_sent()) {
@@ -202,11 +224,11 @@ class Profiler extends Object implements IProfiler, IDebugPanel {
                     header("X-Wf-dibi-1-1-d$num: |$s|");
                 }
             }
-
+            
             if ($this->file) {
                 $this->writeFile(
-                    "OK: " . $query
-                    . ($res instanceof ICursor ? ";\n-- rows: " . $count : '')
+                    "OK: " . self::$types[$event] . ': ' . $namespace . ': ' . $query
+                    . ($result instanceof ICursor ? ";\n-- rows: " . $count : '')
                     . "\n-- takes: " . sprintf('%0.3f', $time * 1000) . ' ms'
                     . "\n-- driver: " . 'MongoDB'/* . '/' . $connection->getConfig('name')*/
                     . "\n-- " . date('Y-m-d H:i:s')
@@ -240,7 +262,7 @@ class Profiler extends Object implements IProfiler, IDebugPanel {
             $this->writeFile(
                 "ERROR: $message"
                 . "\n-- query: " . $exception->getQuery()
-                . "\n-- driver: " //. $connection->getConfig('driver')
+                . "\n-- driver: MongoDB"
                 . ";\n-- " . date('Y-m-d H:i:s')
                 . "\n\n"
             );
@@ -293,21 +315,24 @@ class Profiler extends Object implements IProfiler, IDebugPanel {
 <div class='nette-inner'>
 <table>
 <tr>
-    <th>Time</th><th>Query</th><th>Rows</th><th>Connection</th>
+    <th>Time</th><th>Type</th><th>Namespace</th><th>Query</th><th>Rows</th><th>Connection</th>
 </tr>
 ";
         $i = 0; $classes = array('class="nette-alt"', '');
         foreach (self::$tickets as $ticket) {
-            list($connection, $event, $query, $time, $count, $explain) = $ticket;
+            list($connection, $event, $namespace, $query, $time, $count, $explain) = $ticket;
             if (!($event & self::QUERY)) continue;
+            
             $content .= "
 <tr {$classes[++$i%2]}>
     <td>" . sprintf('%0.3f', $time * 1000) . ($explain ? "
     <br><a href='#' class='nette-toggler' rel='#nette-debug-DibiProfiler-row-$i'>explain&nbsp;&#x25ba;</a>" : '') . "</td>
+    <td>" . self::$types[$event] . "</td>
+    <td>{$namespace}</td>
     <td class='dibi-sql'>" . self::dump((strlen($query) > self::$maxLength) ? substr($query, 0, self::$maxLength) . '...' : $query, TRUE) . ($explain ? "
     <div id='nette-debug-DibiProfiler-row-$i'>{$explain}</div>" : '') . "</td>
     <td>{$count}</td>
-    <td>" . htmlSpecialChars($connection->getConfig('driver') . '/' . $connection->getConfig('name')) . "</td>
+    <td>" . htmlSpecialChars('MongoDB' /*. $connection->getConfig('name')*/) . "</td>
 </tr>
 ";
         }
@@ -323,6 +348,46 @@ class Profiler extends Object implements IProfiler, IDebugPanel {
      */
     public function getId() {
         return get_class($this);
+    }
+    
+    
+    /**
+     * Prints out a syntax highlighted version of the SQL command or DibiResult.
+     * @param  string|DibiResult
+     * @param  bool  return output instead of printing it?
+     * @return string
+     */
+    public static function dump($sql = NULL, $return = FALSE) {
+        ob_start();
+        if ($sql instanceof DibiResult) {
+            $sql->dump();
+            
+        } else {
+            if ($sql === NULL) return;
+            
+            static $keywords1 = 'SELECT|UPDATE|INSERT(?:\s+INTO)?|REPLACE(?:\s+INTO)?|DELETE|FROM|WHERE|HAVING|GROUP\s+BY|ORDER\s+BY|LIMIT|SET|VALUES|LEFT\s+JOIN|INNER\s+JOIN|TRUNCATE';
+            static $keywords2 = 'ALL|DISTINCT|DISTINCTROW|AS|USING|ON|AND|OR|IN|IS|NOT|NULL|LIKE|TRUE|FALSE';
+            
+            // insert new lines
+            $sql = " $sql ";
+            $sql = preg_replace("#(?<=[\\s,(])($keywords1)(?=[\\s,)])#i", "\n\$1", $sql);
+            
+            // reduce spaces
+            $sql = preg_replace('#[ \t]{2,}#', " ", $sql);
+            
+            $sql = wordwrap($sql, 100);
+            $sql = htmlSpecialChars($sql);
+            $sql = preg_replace("#([ \t]*\r?\n){2,}#", "\n", $sql);
+            
+            $sql = trim($sql);
+            echo '<pre class="dump">', $sql, "</pre>\n";
+        }
+        
+        if ($return) {
+            return ob_get_clean();
+        } else {
+            ob_end_flush();
+        }
     }
     
 }

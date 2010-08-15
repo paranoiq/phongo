@@ -2,6 +2,7 @@
 
 namespace Phongo;
 
+use Mongo;
 use MongoDB;
 use MongoCollection;
 use MongoDBRef;
@@ -21,40 +22,39 @@ interface IDatabase {
 }
 
 
-class Database extends Object implements IDatabase {
-    
-    /**#@+ request result behavior */
-    const SYNC   = TRUE;
-    const ASYNC  = FALSE;
-    const IGNORE = NULL;
-    /**#@-*/
+class Database extends Base implements IDatabase {
     
     
     /** @var IConnection */
     private $connection;
+    
     /** @var MongoDB */
     private $database;
+    // DO NOT USE DIRECTLY! call $this->getName()
     /** @var string */
     private $name;
-    
-    /** @var integer replicate to n servers */
-    private $safeMode = 0;
-    /** @var bool sync to file before returning */
-    private $fileSync = FALSE;
-    
-    /** @var bool */
-    private $strictMode = FALSE;
     
     /** @var array cursor options */
     private $cursorOptions = array();
     
-    /** @var DatabaseInfo */
+    /** @var Phongo\DatabaseInfo */
     private $info;
     
-    /** @var MongoCollection */
+    /** @var array<MongoCollection> */
+    private $collections = array();
+    
+    /** @var string */
+    private $namespace;
+    /** @var string */
     private $collection;
+    /** @var string */
+    private $tempColl;
+    
     /** @var integer */
     private $affectedItems = NULL;
+    
+    /** @var Phongo\Profiler */
+    private $profiler;
     
     
     /**
@@ -62,53 +62,72 @@ class Database extends Object implements IDatabase {
      * @param string
      * @param array
      */
-    public function __construct(IConnection $connection, MongoDB $database, $name, $options = array()) {
+    public function __construct(IConnection $connection, MongoDB $database, $options = array()) {
         $this->connection = $connection;
         $this->database = $database;
-        $this->name = $name;
-        ///
+        
+        $this->options = $options;
         
         $this->cursorOptions = array_intersect_key($options, array_flip(
-            array('snapshotMode', 'slaveOkay', 'timeout', 'keepAlive', 'tailable')));
+            array('snapshot', 'slaveOkay', 'timeout', 'keepAlive', 'tailable')));
+        
+        $this->profiler = $connection->getProfiler();
     }
     
+    
+    /** @return Phongo\Connection */
+    public function getConnection() {
+        return $this->connection;
+    }
+    
+    /** @return Phongo\Cache */
+    public function getCache() {
+        return $this->connection->getCache();
+    }
     
     /**
      * @return string
      */
     public function getName() {
+        if (!isset($this->name)) {
+            // MongoDB does not provide database name :[
+            // call without profiler!
+            $coll = $this->database->selectCollection('system.namespaces');
+            $ns = $coll->findOne(array(), array());
+            $this->name = substr($ns['name'], 0, strpos($ns['name'], '.'));
+        }
         return $this->name;
     }
     
-    /** @return array */
-    private function getOptions() {
-        $options = array();
-        if ($this->safeMode) $options['safe']  = version_compare(Mongo::VERSION, '1.0.9', '<') ? TRUE : $this->safeMode;
-        if ($this->fileSync) $options['fsync'] = TRUE;
-        return $options;
+    public function isSafe() {
+        if (isset($this->options['safe'])) return $this->options['safe'];
+        if (isset($this->connection->options['safe'])) return $this->connection->options['safe'];
+        return 0;
+    }
+    
+    public function isFsync() {
+        if (isset($this->options['fsync'])) return $this->options['fsync'];
+        if (isset($this->connection->options['fsync'])) return $this->connection->options['fsync'];
+        return FALSE;
+    }
+    
+    public function isStrict() {
+        if (isset($this->options['strict'])) return $this->options['strict'];
+        if (isset($this->connection->options['strict'])) return $this->connection->options['strict'];
+        return FALSE;
     }
     
     /** @return bool */
     public function isSync() {
-        return $this->safeMode || $this->fileSync;
+        return $this->isSafe() || $this->isFsync();
     }
     
-    /** @param int */
-    public function setSafeMode($numServers = 1) {
-        $this->safeMode = (int)$numServers;
-        return $this;
-    }
-    
-    /** @param bool */
-    public function setFileSync($fileSync = TRUE) {
-        $this->fileSync = (bool)$fileSync;
-        return $this;
-    }
-    
-    /** @param bool */
-    public function setStrictMode($strictMode = TRUE) {
-        $this->strictMode = (bool)$strictMode;
-        return $this;
+    /** @return array */
+    private function getQueryOptions() {
+        $options = array();
+        if ($this->isSafe()) $options['safe']  = version_compare(Mongo::VERSION, '1.0.9', '<') ? TRUE : $this->isSafe();
+        if ($this->isFsync()) $options['fsync'] = TRUE;
+        return $options;
     }
     
     /** @return DatabaseInfo */
@@ -120,7 +139,7 @@ class Database extends Object implements IDatabase {
     
     public function drop() {
         $this->checkResult($this->database->drop());
-        $this->connection->releaseDatabase($this->name);
+        $this->connection->releaseDatabase($this->getName());
     }
     
     /**
@@ -130,30 +149,432 @@ class Database extends Object implements IDatabase {
     public function repair($preserveClonedFiles = FALSE, $backupOriginalFiles = FALSE) {
         $this->checkResult($this->database->repair($preserveClonedFiles, $backupOriginalFiles));
         // Anti-WTF:: repair() deletes database if it's empty. re-create if strict mode is set
-        if ($this->strictMode) $this->connection->createDatabase($this->name);
+        if ($this->isStrict()) $this->connection->createDatabase($this->getName());
         
         return $this;
     }
     
     
-    // -- RESOURCES ----------------------------------------------------------------------------------------------------
+    // -- COLLECTION SELECTION -----------------------------------------------------------------------------------------
     
+    
+    /**
+     * Select namespace to use
+     * @param string
+     */
+    public function useNamespace($namespace) {
+        $this->namespace = $namespace;
+        $this->tempColl = NULL;
+        $this->collection = NULL;
+        
+        return $this;
+    }
+    
+    /**
+     * Select collection to use
+     * @param string
+     * @param string|NULL
+     */
+    public function useCollection($collection, $namespace = TRUE) {
+        if ($namespace !== TRUE) $this->useNamespace($namespace);
+        $this->tempColl = NULL;
+        $this->collection = $collection;
+        
+        return $this;
+    }
+    
+    /**
+     * Select collection temporarily
+     * @param string
+     */
+    public function collection($collection) {
+        $this->tempColl = $collection;
+        
+        return $this;
+    }
+    
+    /**
+     * provides fluent namespaces: $db->name->space->collection->find();
+     * @param string
+     */
+    public function &__get($name) {
+        if (isset($this->tempColl)) {
+            $this->tempColl .= '.' . $name;
+        } else {
+            $this->tempColl = $name;
+        }
+        
+        return $this;
+    }
     
     /**
      * @param string
      */
     private function getCollection($collection) {
-        if ($this->strictMode && !is_null($collection) && !preg_match('/^(system|$cmd)\./', $collection)
-            && !in_array($collection, $this->getCollectionList($database))) 
-            throw new StructureException("Collection '$collection' is not created!");
+        $name = $this->determineCollectionName($collection);
         
-        if (!is_null($collection)) 
-            return $this->database->selectCollection($collection);
+        if (!is_null($name)) {
+            $coll = $this->database->selectCollection($name);
+            $this->collections[$name] = $coll;
+            return $coll;
+        }
         
-        if ($this->collection) 
-            return $this->collection;
+        if (isset($this->collections[$this->collection])) 
+            return $this->collections[$this->collection];
         
-        throw new InvalidStateException('No collection selected!');
+        throw new \InvalidStateException('No collection selected!');
+    }
+    
+    /**
+     * @return string
+     */
+    private function determineCollectionName($collection = NULL) {
+        if (isset($collection)) {
+            $name = $collection;
+            if (isset($this->tempColl)) 
+                trigger_error("Collection '$this->tempColl' selected via collection() or __get() is not used. Check your logic!", E_USER_NOTICE);
+        } elseif (isset($this->tempColl)) {
+            $name = $this->tempColl;
+        } elseif (isset($this->collection)) {
+            $name = $this->collection;
+        } else {
+            throw new \InvalidStateException("No collection selected!");
+        }
+        
+        if (isset($this->namespace)) $name = $this->namespace . '.' . $name;
+        
+        if (!Tools::validateCollectionName($collection, TRUE))
+            throw new \InvalidArgumentException("Collection name '$collection' is not valid.");
+        
+        if ($this->isStrict() && !preg_match('/^(local|system|$cmd.sys)\./', $name) && !in_array($name, $this->getInfo()->getCollectionList())) 
+            throw new DatabaseException("Collection '$name' does not exist!");
+        
+        $this->tempColl = NULL;
+        return $name;
+    }
+    
+    /**
+     * @return string
+     */
+    public function getCollectionName() {
+        return $this->getCollection()->getName();
+    }
+    
+    
+    // -- DATA QUERIES -------------------------------------------------------------------------------------------------
+    
+    
+    /**
+     * @param array|string PHP or JSON array
+     * @param string
+     * @return array command result
+     */
+    public function runCommand($command) {
+        if (!is_array($command)) $command = Converter::jsonToMongo($command);
+        
+        if ($this->profiler) 
+            $ticket = $this->profiler->before($this, IProfiler::COMMAND, $this->getName(), $command);
+        
+        $result = $this->checkResult($this->database->command($command));
+        
+        if (isset($ticket)) $this->profiler->after($ticket);
+        
+        return $result;
+    }
+    
+    
+    /**
+     * Find objects. Returns a cursor
+     * 
+     * @param array|string
+     * @param array
+     * @param string
+     * @return Phongo\ICursor
+     */
+    public function find($query = array(), $fields = array(), $collection = NULL) {
+        if ($query instanceof Reference) return $this->get($query);
+        
+        if (!$fields) $fields = array();
+        /*dump($fields);
+        exit;*/
+        if (!is_array($query)) $query = Converter::jsonToMongo($query);
+        
+        $namespace = $this->getName() . '.' . $this->determineCollectionName($collection);
+        $class = $this->connection->cursorClass;
+        $cursor = new $class(
+            $this->connection->mongo,
+            $namespace,
+            $query,
+            $fields,
+            $this->cursorOptions,
+            $this->profiler);
+        
+        return $cursor;
+    }
+    
+    
+    /**
+     * Find and return just one object
+     * 
+     * @param array|string
+     * @param array
+     * @param string
+     * @return array found object
+     */
+    public function findOne($query = array(), $columns = array(), $collection = NULL) {
+        if ($query instanceof Reference) return $this->get($query);
+        
+        if (!is_array($query)) $query = Converter::jsonToMongo($query);
+        
+        $coll = $this->getCollection($collection);
+        
+        if ($this->profiler) 
+            $ticket = $this->profiler->before($this, IProfiler::FINDONE, $this->getName() . '.' . $coll->getName(), $query);
+        
+        $result = $coll->findOne($query);
+        
+        if (isset($ticket)) $this->profiler->after($ticket, $result ? 1 : 0);
+        
+        /// validate!
+        return $result;
+    }
+    
+    
+    /**
+     * Get object by reference or id.
+     * 
+     * @param Reference|string|array
+     * @param string
+     * @return Phongo\ICursor
+     */
+    public function get($reference, $collection = NULL) {
+        if ($reference instanceof Reference) {
+            $reference = $reference->getMongoDBRef();
+        } elseif (is_array($reference) && MongoDBRef::validate($reference)) {
+            // OK
+        } elseif (is_string($reference) && strlen($reference) == 24) {
+            $collName = $this->determineCollectionName($collection);
+            $reference = MongoDBRef::create($collName, $reference, $this->getName());
+        } else {
+            throw new \InvalidArgumentException('Invalid database reference.');
+        }
+        
+        if ($this->profiler) 
+            $ticket = $this->profiler->before($this, IProfiler::GET, $this->getName() . '.' . $reference['$ref'], $reference);
+        
+        $result = MongoDBRef::get($this->database, $reference);
+        
+        if (isset($ticket)) $this->profiler->after($ticket, $result ? 1 : 0);
+        
+        /// validate!
+        return $result;
+    }
+    
+    
+    /**
+     * Returns count of matching objects
+     * 
+     * @param array|string
+     * @param string
+     * @return int
+     */
+    public function count($query = array(), $collection = NULL) {
+        if (!is_array($query)) $query = Converter::jsonToMongo($query);
+        
+        $coll = $this->getCollection($collection);
+        
+        if ($this->profiler) 
+            $ticket = $this->profiler->before($this, IProfiler::FIND, $this->getName() . '.' . $coll->getName(), $reference);
+        
+        $count = $coll->count(array('count' => $query));
+        
+        if (isset($ticket)) $this->profiler->after($ticket, $count ?: 0);
+        
+        return $count;
+    }
+    
+    
+    /**
+     * Returns data size of matching items
+     * 
+     * /// TODO: implement query
+     * @param string
+     * @param string
+     * @param string
+     * @return int
+     */
+    public function size($query = array(), $collection = NULL) {
+        $namespace = $this->getName() . '.' . $this->getCollection($collection)->getName();
+        /// query
+        return $this->runCommand(array('dataSize' => $namespace));
+    }
+    
+    
+    /**
+     * Insert a new object into collection (fails if it exists already)
+     * 
+     * @param array|string
+     * @param string
+     * @return array inserted object
+     */
+    public function insert($object, $collection = NULL) {
+        $options = $this->getQueryOptions();
+        if (!is_array($object)) $object = Converter::jsonToMongo($object);
+        
+        $coll = $this->getCollection($collection);
+        
+        if ($this->profiler) 
+            $ticket = $this->profiler->before($this, IProfiler::INSERT, $this->getName() . '.' . $coll->getName(), $object);
+        
+        try {
+            $this->checkResult($coll->insert($object, $options), $this->isSync());
+        } catch (\Exception $e) {
+            if (isset($ticket)) $this->profiler->after($ticket, -1);
+            throw $e;
+        }
+        
+        if (isset($ticket)) $this->profiler->after($ticket, 1);
+        
+        return $object;
+    }
+    
+    
+    /**
+     * Insert an array of new objects into collection (fails if they exist already)
+     * 
+     * @param array<array|string>
+     * @param string
+     * @return array<array> inserted objects
+     */
+    public function batchInsert($objects, $collection = NULL) {
+        $options = $this->getQueryOptions();
+        foreach ($objects as $id => $object) {
+            if (!is_array($object)) $objects[$id] = Converter::jsonToMongo($object);
+        }
+        
+        $coll = $this->getCollection($collection);
+        
+        if ($this->profiler) 
+            $ticket = $this->profiler->before($this, IProfiler::INSERT, $this->getName() . '.' . $coll->getName(), $object);
+        
+        try {
+            $this->checkResult($coll->batchInsert($objects, $options), $this->isSync());
+        } catch (\Exception $e) {
+            if (isset($ticket)) $this->profiler->after($ticket, -1);
+            throw $e;
+        }
+        
+        if (isset($ticket)) $this->profiler->after($ticket, -2); /// get count!
+        
+        return $objects;
+    }
+    
+    
+    /**
+     * Save an object into collection (replace existing or insert a new one)
+     * - does not support fileSync yet?
+     * 
+     * @param array|string
+     * @param string
+     * @return array saved object
+     */
+    public function save($object, $collection = NULL) {
+        $options = $this->getQueryOptions();
+        if (!is_array($object)) $object = Converter::jsonToMongo($object);
+        
+        $coll = $this->getCollection($collection);
+        
+        if ($this->profiler) 
+            $ticket = $this->profiler->before($this, IProfiler::SAVE, $this->getName() . '.' . $coll->getName(), $object);
+        
+        try {
+            $this->checkResult($coll->save($object, $options), $this->isSync());
+        } catch (\Exception $e) {
+            if (isset($ticket)) $this->profiler->after($ticket, -1);
+            throw $e;
+        }
+        
+        if (isset($ticket)) $this->profiler->after($ticket, 1);
+        
+        return $object;
+    }
+    
+    
+    /**
+     * Update existing items in collection or create a new one (upsert)
+     * 
+     * @param array|string
+     * @param array|string
+     * @param bool
+     * @param bool
+     * @param string
+     * @return integer number of affected items     
+     */
+    public function update($query, $modifier, $single = FALSE, $upsert = FALSE, $collection = NULL) {
+        $options = $this->getQueryOptions();
+        if (!$single) $options['multiple'] = 1;
+        if ($upsert) $options['upsert'] = 1;
+        if (!is_array($query)) $query = Converter::jsonToMongo($query);
+        if (!is_array($modifier)) $modifier = Converter::jsonToMongo($modifier);
+        
+        $coll = $this->getCollection($collection);
+        
+        if ($this->profiler) 
+            $ticket = $this->profiler->before($this, IProfiler::UPDATE, $this->getName() . '.' . $coll->getName(), $query);
+        
+        try {
+            $result = $this->checkResult($coll->update($query, $modifier, $options), $this->isSync());
+        } catch (\Exception $e) {
+            if (isset($ticket)) $this->profiler->after($ticket, -1);
+            $result = array();
+            throw $e;
+        }
+        
+        $this->affectedItems = isset($result['n']) ? $result['n'] : NULL;
+        
+        if (isset($ticket)) $this->profiler->after($ticket, $this->affectedItems ?: -2);
+        
+        return $this->affectedItems;
+    }
+    
+    
+    /**
+     * Delete items from collection
+     * 
+     * @param array|sting
+     * @param bool
+     * @param string
+     * @return integer number of affected items     
+     */
+    public function delete($query, $single = FALSE, $collection = NULL) {
+        $options = $this->getQueryOptions();
+        if ($single) $options['justOne'] = 1;
+        if (!is_array($query)) $query = Converter::jsonToMongo($query);
+        
+        $coll = $this->getCollection($collection);
+        
+        if ($this->profiler) 
+            $ticket = $this->profiler->before($this, IProfiler::DELETE, $this->getName() . '.' . $coll->getName(), $query);
+        
+        try {
+            $result = $this->checkResult($coll->remove($query, $options), $this->isSync());
+        } catch (\Exception $e) {
+            if (isset($ticket)) $this->profiler->after($ticket, -1);
+            $result = array();
+            throw $e;
+        }
+        
+        $this->affectedItems = isset($result['n']) ? $result['n'] : NULL;
+        
+        if (isset($ticket)) $this->profiler->after($ticket, $this->affectedItems ?: -2);
+        
+        return $this->affectedItems;
+    }
+    
+    
+    /** @return integer */
+    public function getAffectedItems() {
+        return $this->affectedItems;
     }
     
     
@@ -162,14 +583,14 @@ class Database extends Object implements IDatabase {
      * @param bool 
      * @return array
      */
-    private function checkResult($result, $type = self::SYNC) {
+    private function checkResult($result, $type = Phongo::SYNC) {
         // special case when a request may return NULL (no action performed)
-        /// co když je akce provedena? sync? async?
-        if ($type === self::IGNORE && $result === NULL) return;
+        /// co když je akce provedena? sync? async? WTF! bug!
+        if ($type === Phongo::IGNORE && $result === NULL) return;
         
-        if ($type === self::SYNC) {
+        if ($type === Phongo::SYNC) {
             $error = $result;
-        } elseif ($type === self::ASYNC && $this->isSync()) {
+        } elseif ($type === Phongo::ASYNC && $this->isSync()) {
             $error = $this->lastDatabase->lastError();
         } else {
             // check only return value
@@ -188,231 +609,25 @@ class Database extends Object implements IDatabase {
     }
     
     
-    // -- DATA QUERIES -------------------------------------------------------------------------------------------------
-    
-    
-    /**
-     * Find objects. Returns a cursor
-     *          
-     * @param array|string
-     * @param array
-     * @param string
-     * @return Phongo\ICursor
-     */
-    public function find($query = array(), $fields = array(), $collection = NULL) {
-        if (!$fields) $fields = array();
-        /*dump($fields);
-        exit;*/
-        if (!is_array($query)) $query = Converter::jsonToMongo($query);
-        
-        $cursor = $this->getCollection($collection)->find($query, $fields);
-        
-        $class = $this->connection->getCursorClass();
-        
-        return new $class($cursor, $this->cursorOptions);;
-    }
-    
-    
-    /**
-     * Find and return just one object
-     * 
-     * @param array|string
-     * @param array
-     * @param string
-     * @return array found object
-     */
-    public function findOne($query = array(), $columns = array(), $collection = NULL) {
-        if (!is_array($query)) $query = Converter::jsonToMongo($query);
-        
-        $result = $this->getCollection($collection)->findOne($query);
-        
-        /// validate!
-        return $result;
-    }
-    
-    
-    /**
-     * Get object by reference or id.
-     *          
-     * @param Reference|string
-     * @param string
-     * @return Phongo\ICursor
-     */
-    public function get($reference, $collection = NULL) {
-        if ($reference instanceof Reference) {
-            $result = MongoDBRef::get($this->database, $reference->getReference());
-        } else {
-            $ref = MongoDBRef::create($collection, $reference, $this->name);
-            $result = MongoDBRef::get($this->database, $ref);
-        }
-        
-        /// validate!
-        return $result;
-    }
-    
-    
-    /**
-     * Returns count of matching objects
-     * 
-     * @param array|string
-     * @param string
-     * @return int
-     */
-    public function count($query = array(), $collection = NULL) {
-        if (!is_array($query)) $query = Converter::jsonToMongo($query);
-        
-        return $this->getCollection($collection)->count(array('count' => $query));
-    }
-    
-    
-    /**
-     * Returns data size of matching items
-     * 
-     * /// TODO: implement query
-     * @param string     
-     * @param string
-     * @param string
-     * @return int
-     */
-    public function size($query = array(), $collection = NULL) {
-        $namespace = $this->name . '.' . $this->getCollection($collection)->getName();
-        /// query
-        return $this->runCommand(array('dataSize' => $namespace));
-    }
-    
-    
-    /**
-     * Insert a new object into collection (fails if it exists already)
-     * 
-     * @param array|string
-     * @param string
-     * @return array inserted object
-     */
-    public function insert($object, $collection = NULL) {
-        $options = $this->getOptions();
-        if (!is_array($object)) $object = Converter::jsonToMongo($object);
-        
-        $this->checkResult($this->getCollection($collection)->insert($object, $options), $this->isSync());
-        
-        return $object;
-    }
-    
-    
-    /**
-     * Insert an array of new objects into collection (fails if they exist already)
-     * 
-     * @param array<array|string>
-     * @param string
-     * @return array<array> inserted objects
-     */
-    public function batchInsert($objects, $collection = NULL) {
-        $options = $this->getOptions();
-        foreach ($objects as $id => $object) {
-            if (!is_array($object)) $objects[$id] = Converter::jsonToMongo($object);
-        }
-        
-        $this->checkResult($this->getCollection($collection)->batchInsert($objects, $options), $this->isSync());
-        
-        return $objects;
-    }
-    
-    
-    /**
-     * Save an object into collection (replace existing or insert a new one)
-     * - does not support fileSync yet?
-     * 
-     * @param array|string
-     * @param string
-     * @return array saved object     
-     */
-    public function save($object, $collection = NULL) {
-        $options = $this->getOptions();
-        if (!is_array($object)) $object = Converter::jsonToMongo($object);
-        
-        $this->checkResult($this->getCollection($collection)->save($object, $options), $this->isSync());
-        
-        return $object;
-    }
-    
-    
-    /**
-     * Update existing items in collection or create a new one (upsert)
-     * 
-     * @param array|string
-     * @param array|string
-     * @param bool
-     * @param bool
-     * @param string
-     * @return integer number of affected items     
-     */
-    public function update($query, $modifier, $single = FALSE, $upsert = FALSE, $collection = NULL) {
-        $options = $this->getOptions();
-        if (!$single) $options['multiple'] = 1;
-        if ($upsert) $options['upsert'] = 1;
-        if (!is_array($query)) $query = Converter::jsonToMongo($query);
-        if (!is_array($modifier)) $modifier = Converter::jsonToMongo($modifier);
-        
-        $result = $this->checkResult($this->getCollection($collection)->update($query, $modifier, $options), $this->isSync());
-        $this->affectedItems = isset($result['n']) ? $result['n'] : NULL;
-        
-        return $this->affectedItems;
-    }
-    
-    
-    /**
-     * Delete items from collection
-     * 
-     * @param array|sting
-     * @param bool
-     * @param string
-     * @return integer number of affected items     
-     */
-    public function delete($query, $single = FALSE, $collection = NULL) {
-        $options = $this->getOptions();
-        if ($single) $options['justOne'] = 1;
-        if (!is_array($query)) $query = Converter::jsonToMongo($query);
-        
-        $result = $this->checkResult($this->getCollection($collection)->remove($query, $options), $this->isSync());
-        $this->affectedItems = isset($result['n']) ? $result['n'] : NULL;
-        
-        return $this->affectedItems;
-    }
-    
-    
-    /**
-     * @param array|string PHP or JSON array
-     * @param string
-     * @return array command result
-     */
-    public function runCommand($command) {
-        if (!is_array($command)) $command = Converter::jsonToMongo($command);
-        
-        return $this->checkResult($this->database->command($command));
-    }
-    
-    
-    /** @return integer */
-    public function getAffectedItems() {
-        return $this->affectedItems;
-    }
-    
-    
     // -- COLLECTIONS --------------------------------------------------------------------------------------------------
     
     
     /**
-     * @return string
-     */
-    public function getCollectionName() {
-        return $this->getCollection()->getName();
-    }
-    
-    /**
      * @param string
-     * @param string
+     * @param array options (capped, size, max, autoIndexId)
+     * - capped: bool, fixed size collection
+     * - size: integer, prealocated space for collection (maximal size for capped collection)
+     * - max: integer, maximum number of items in capped collection
+     * - autoIndexId: bool, create automatic index on key `_id` (default is TRUE)
      */
-    public function selectCollection($collection) {
-        $this->collection = $this->getCollection($collection);
+    public function createCollection($collection, $options = array()) {
+        if (!Tools::validateCollectionName($collection))
+            throw new \InvalidArgumentException("Collection name '$collection' is not valid.");
+        
+        $query = array_merge(array('create' => $collection), $options);
+        
+        $this->checkResult($this->runCommand($query));
+        $this->collection = $collection;
         
         return $this;
     }
@@ -420,23 +635,6 @@ class Database extends Object implements IDatabase {
     /**
      * @param string
      * @param bool
-     * @param integer
-     * @param integer               
-     */
-    public function createCollection($collection = NULL, $capped = FALSE, $size = 0, $maxItems = 0) {
-        $collection = $this->database->createCollection($collection, $capped, $size, $maxItems);
-        if ($collection instanceof MongoCollection) {
-            $this->collection = $collection;
-        } else {
-            $this->checkResult($collection);
-        }
-        
-        return $this;
-    }
-    
-    /**
-     * @param string
-     * @param bool     
      */
     public function validateCollection($collection = NULL, $validateData = FALSE) {
         $this->checkResult($this->getCollection($collection)->validate($validateData = FALSE));
@@ -454,6 +652,7 @@ class Database extends Object implements IDatabase {
     /** @param string */
     public function emptyCollection($collection = NULL) {
         $this->delete(array(), FALSE, $collection);
+        /// drop + create?
         
         return $this;
     }
@@ -464,10 +663,10 @@ class Database extends Object implements IDatabase {
      * @param string
      */
     public function renameCollection($newCollection, $newDatabase = NULL, $collection = NULL) {
-        $old = $this->name . '.' . $this->getCollection($collection)->getName();
-        $new = ($newDatabase ?: $this->databaseName) . '.' . $newCollection;
+        $old = $this->getName() . '.' . $this->getCollection($collection)->getName();
+        $new = ($newDatabase ?: $this->getName()) . '.' . $newCollection;
         
-        $this->connection->admin->runCommand(array('renameCollection' => $old, 'to' => $new));
+        $this->connection->database('admin')->runCommand(array('renameCollection' => $old, 'to' => $new));
         
         return $this;
     }
@@ -483,7 +682,7 @@ class Database extends Object implements IDatabase {
      * @param string
      */
     public function createIndex($keys, $options = array(), $collection = NULL) {
-        if (empty($options['background']) && $this->safeMode) $options['safe'] = 1;
+        if (empty($options['background']) && $this->isSafe()) $options['safe'] = 1;
         
         $result = $this->getCollection($collection)->ensureIndex($keys, $options);
         $this->checkResult($result, isset($options['safe']));
@@ -513,7 +712,7 @@ class Database extends Object implements IDatabase {
     
     /** @param string */
     public function reindexCollection($collection = NULL) {
-        $this->runCommand(array('reIndex' => $this->getCollection($collection, $database)->getName()));
+        $this->runCommand(array('reIndex' => $this->getCollection($collection)->getName()));
         
         return $this;
     }
