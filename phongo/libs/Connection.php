@@ -28,6 +28,9 @@ interface IConnection {
 
 abstract class Base extends Object {
     
+    /** @var Mongo */
+    protected $mongo;
+    
     /** @var string */
     protected $cursorClass = 'Phongo\Cursor';
     
@@ -74,15 +77,14 @@ abstract class Base extends Object {
  */
 class Connection extends Base implements IConnection {
     
+    /** @var bool*/
+    private $connected = FALSE;
     /** @var array */
     private $servers = array();
     /** @var string */
     private $username;
     /** @var string */
     private $password;
-    
-    /** @var Mongo */
-    private $mongo;
     
     /** @var array<Phongo\IDatabase> active database drivers */
     private $databases = array();
@@ -91,7 +93,10 @@ class Connection extends Base implements IConnection {
     private $info;
     
     /** @var Phongo\Cache */
-    protected $cache;
+    private $cache;
+    
+    /** @var Phongo\Profiler */
+    private $profiler;
     
     
     /**
@@ -128,11 +133,13 @@ class Connection extends Base implements IConnection {
         //$this->password = $options['password'];
         
         //$profiler
+        
         unset($options['servers']);
         $this->options = $options;
     }
     
-    /** @return DatabaseInfo */
+    
+    /** @return Phongo\DatabaseInfo */
     public function getInfo() {
         if (!$this->info) $this->info = new ConnectionInfo($this);
         return $this->info;
@@ -144,12 +151,24 @@ class Connection extends Base implements IConnection {
         return $this->cache;
     }
     
+    /** @return Phongo\IProfiler */
+    public function getProfiler() {
+        return $this->profiler;
+    }
+    
+    /** @param Phongo\IProfiler */
+    public function setProfiler(IProfiler $profiler) {
+        $this->profiler = $profiler;
+    }
+    
     
     // -- CONNECTION ---------------------------------------------------------------------------------------------------
     
     
     /** @return bool */
     public function connect() {
+        if ($this->connected) return $this;
+        
         $dsn = 'mongodb://';
         $dsn .= implode(',', $this->servers);
         if ($this->username) {
@@ -158,12 +177,16 @@ class Connection extends Base implements IConnection {
             $dsn .= '@';
         }
         
+        if ($this->profiler) $ticket = $this->profiler->before($this, IProfiler::CONNECT);
+        
         try {
             $this->mongo = new Mongo($dsn, array("connect" => TRUE));
             $this->mongo->connect();
 		} catch (MongoConnectionException $e) {
             throw new DatabaseException($e->getMessage(), $dsn);
         }
+        
+        if (isset($ticket)) $this->profiler->after($ticket);
         
         return $this;
     }

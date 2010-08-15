@@ -53,6 +53,9 @@ class Database extends Base implements IDatabase {
     /** @var integer */
     private $affectedItems = NULL;
     
+    /** @var Phongo\Profiler */
+    private $profiler;
+    
     
     /**
      * @param MongoDB
@@ -62,12 +65,13 @@ class Database extends Base implements IDatabase {
     public function __construct(IConnection $connection, MongoDB $database, $options = array()) {
         $this->connection = $connection;
         $this->database = $database;
-        ///
         
         $this->options = $options;
         
         $this->cursorOptions = array_intersect_key($options, array_flip(
             array('snapshot', 'slaveOkay', 'timeout', 'keepAlive', 'tailable')));
+        
+        $this->profiler = $connection->getProfiler();
     }
     
     
@@ -87,7 +91,9 @@ class Database extends Base implements IDatabase {
     public function getName() {
         if (!isset($this->name)) {
             // MongoDB does not provide database name :[
-            $ns = $this->findOne(array(), array(), 'system.namespaces');
+            // call without profiler!
+            $coll = $this->database->selectCollection('system.namespaces');
+            $ns = $coll->findOne(array(), array());
             $this->name = substr($ns['name'], 0, strpos($ns['name'], '.'));
         }
         return $this->name;
@@ -259,6 +265,25 @@ class Database extends Base implements IDatabase {
     
     
     /**
+     * @param array|string PHP or JSON array
+     * @param string
+     * @return array command result
+     */
+    public function runCommand($command) {
+        if (!is_array($command)) $command = Converter::jsonToMongo($command);
+        
+        if ($this->profiler) 
+            $ticket = $this->profiler->before($this, IProfiler::COMMAND, $this->getName(), $command);
+        
+        $result = $this->checkResult($this->database->command($command));
+        
+        if (isset($ticket)) $this->profiler->after($ticket);
+        
+        return $result;
+    }
+    
+    
+    /**
      * Find objects. Returns a cursor
      * 
      * @param array|string
@@ -267,16 +292,24 @@ class Database extends Base implements IDatabase {
      * @return Phongo\ICursor
      */
     public function find($query = array(), $fields = array(), $collection = NULL) {
+        if ($query instanceof Reference) return $this->get($query);
+        
         if (!$fields) $fields = array();
         /*dump($fields);
         exit;*/
         if (!is_array($query)) $query = Converter::jsonToMongo($query);
         
-        $cursor = $this->getCollection($collection)->find($query, $fields);
-        
+        $namespace = $this->getName() . '.' . $this->determineCollectionName($collection);
         $class = $this->connection->cursorClass;
+        $cursor = new $class(
+            $this->connection->mongo,
+            $namespace,
+            $query,
+            $fields,
+            $this->cursorOptions,
+            $this->profiler);
         
-        return new $class($cursor, $this->cursorOptions);;
+        return $cursor;
     }
     
     
@@ -289,9 +322,18 @@ class Database extends Base implements IDatabase {
      * @return array found object
      */
     public function findOne($query = array(), $columns = array(), $collection = NULL) {
+        if ($query instanceof Reference) return $this->get($query);
+        
         if (!is_array($query)) $query = Converter::jsonToMongo($query);
         
-        $result = $this->getCollection($collection)->findOne($query);
+        $coll = $this->getCollection($collection);
+        
+        if ($this->profiler) 
+            $ticket = $this->profiler->before($this, IProfiler::FINDONE, $this->getName() . '.' . $coll->getName(), $query);
+        
+        $result = $coll->findOne($query);
+        
+        if (isset($ticket)) $this->profiler->after($ticket, $result ? 1 : 0);
         
         /// validate!
         return $result;
@@ -307,16 +349,22 @@ class Database extends Base implements IDatabase {
      */
     public function get($reference, $collection = NULL) {
         if ($reference instanceof Reference) {
-            $result = MongoDBRef::get($this->database, $reference->getMongoDBRef());
+            $reference = $reference->getMongoDBRef();
         } elseif (is_array($reference) && MongoDBRef::validate($reference)) {
-            $result = MongoDBRef::get($this->database, $reference);
+            // OK
         } elseif (is_string($reference) && strlen($reference) == 24) {
             $collName = $this->determineCollectionName($collection);
-            $ref = MongoDBRef::create($collName, $reference, $this->getName());
-            $result = MongoDBRef::get($this->database, $ref);
+            $reference = MongoDBRef::create($collName, $reference, $this->getName());
         } else {
             throw new \InvalidArgumentException('Invalid database reference.');
         }
+        
+        if ($this->profiler) 
+            $ticket = $this->profiler->before($this, IProfiler::GET, $this->getName() . '.' . $reference['$ref'], $reference);
+        
+        $result = MongoDBRef::get($this->database, $reference);
+        
+        if (isset($ticket)) $this->profiler->after($ticket, $result ? 1 : 0);
         
         /// validate!
         return $result;
@@ -333,7 +381,16 @@ class Database extends Base implements IDatabase {
     public function count($query = array(), $collection = NULL) {
         if (!is_array($query)) $query = Converter::jsonToMongo($query);
         
-        return $this->getCollection($collection)->count(array('count' => $query));
+        $coll = $this->getCollection($collection);
+        
+        if ($this->profiler) 
+            $ticket = $this->profiler->before($this, IProfiler::FIND, $this->getName() . '.' . $coll->getName(), $reference);
+        
+        $count = $coll->count(array('count' => $query));
+        
+        if (isset($ticket)) $this->profiler->after($ticket, $count ?: 0);
+        
+        return $count;
     }
     
     
@@ -364,7 +421,19 @@ class Database extends Base implements IDatabase {
         $options = $this->getQueryOptions();
         if (!is_array($object)) $object = Converter::jsonToMongo($object);
         
-        $this->checkResult($this->getCollection($collection)->insert($object, $options), $this->isSync());
+        $coll = $this->getCollection($collection);
+        
+        if ($this->profiler) 
+            $ticket = $this->profiler->before($this, IProfiler::INSERT, $this->getName() . '.' . $coll->getName(), $object);
+        
+        try {
+            $this->checkResult($coll->insert($object, $options), $this->isSync());
+        } catch (\Exception $e) {
+            if (isset($ticket)) $this->profiler->after($ticket, -1);
+            throw $e;
+        }
+        
+        if (isset($ticket)) $this->profiler->after($ticket, 1);
         
         return $object;
     }
@@ -383,7 +452,19 @@ class Database extends Base implements IDatabase {
             if (!is_array($object)) $objects[$id] = Converter::jsonToMongo($object);
         }
         
-        $this->checkResult($this->getCollection($collection)->batchInsert($objects, $options), $this->isSync());
+        $coll = $this->getCollection($collection);
+        
+        if ($this->profiler) 
+            $ticket = $this->profiler->before($this, IProfiler::INSERT, $this->getName() . '.' . $coll->getName(), $object);
+        
+        try {
+            $this->checkResult($coll->batchInsert($objects, $options), $this->isSync());
+        } catch (\Exception $e) {
+            if (isset($ticket)) $this->profiler->after($ticket, -1);
+            throw $e;
+        }
+        
+        if (isset($ticket)) $this->profiler->after($ticket, -2); /// get count!
         
         return $objects;
     }
@@ -395,13 +476,25 @@ class Database extends Base implements IDatabase {
      * 
      * @param array|string
      * @param string
-     * @return array saved object     
+     * @return array saved object
      */
     public function save($object, $collection = NULL) {
         $options = $this->getQueryOptions();
         if (!is_array($object)) $object = Converter::jsonToMongo($object);
         
-        $this->checkResult($this->getCollection($collection)->save($object, $options), $this->isSync());
+        $coll = $this->getCollection($collection);
+        
+        if ($this->profiler) 
+            $ticket = $this->profiler->before($this, IProfiler::SAVE, $this->getName() . '.' . $coll->getName(), $object);
+        
+        try {
+            $this->checkResult($coll->save($object, $options), $this->isSync());
+        } catch (\Exception $e) {
+            if (isset($ticket)) $this->profiler->after($ticket, -1);
+            throw $e;
+        }
+        
+        if (isset($ticket)) $this->profiler->after($ticket, 1);
         
         return $object;
     }
@@ -424,8 +517,22 @@ class Database extends Base implements IDatabase {
         if (!is_array($query)) $query = Converter::jsonToMongo($query);
         if (!is_array($modifier)) $modifier = Converter::jsonToMongo($modifier);
         
-        $result = $this->checkResult($this->getCollection($collection)->update($query, $modifier, $options), $this->isSync());
+        $coll = $this->getCollection($collection);
+        
+        if ($this->profiler) 
+            $ticket = $this->profiler->before($this, IProfiler::UPDATE, $this->getName() . '.' . $coll->getName(), $query);
+        
+        try {
+            $result = $this->checkResult($coll->update($query, $modifier, $options), $this->isSync());
+        } catch (\Exception $e) {
+            if (isset($ticket)) $this->profiler->after($ticket, -1);
+            $result = array();
+            throw $e;
+        }
+        
         $this->affectedItems = isset($result['n']) ? $result['n'] : NULL;
+        
+        if (isset($ticket)) $this->profiler->after($ticket, $this->affectedItems ?: -2);
         
         return $this->affectedItems;
     }
@@ -444,22 +551,24 @@ class Database extends Base implements IDatabase {
         if ($single) $options['justOne'] = 1;
         if (!is_array($query)) $query = Converter::jsonToMongo($query);
         
-        $result = $this->checkResult($this->getCollection($collection)->remove($query, $options), $this->isSync());
+        $coll = $this->getCollection($collection);
+        
+        if ($this->profiler) 
+            $ticket = $this->profiler->before($this, IProfiler::DELETE, $this->getName() . '.' . $coll->getName(), $query);
+        
+        try {
+            $result = $this->checkResult($coll->remove($query, $options), $this->isSync());
+        } catch (\Exception $e) {
+            if (isset($ticket)) $this->profiler->after($ticket, -1);
+            $result = array();
+            throw $e;
+        }
+        
         $this->affectedItems = isset($result['n']) ? $result['n'] : NULL;
         
-        return $this->affectedItems;
-    }
-    
-    
-    /**
-     * @param array|string PHP or JSON array
-     * @param string
-     * @return array command result
-     */
-    public function runCommand($command) {
-        if (!is_array($command)) $command = Converter::jsonToMongo($command);
+        if (isset($ticket)) $this->profiler->after($ticket, $this->affectedItems ?: -2);
         
-        return $this->checkResult($this->database->command($command));
+        return $this->affectedItems;
     }
     
     
@@ -573,7 +682,7 @@ class Database extends Base implements IDatabase {
      * @param string
      */
     public function createIndex($keys, $options = array(), $collection = NULL) {
-        if (empty($options['background']) && $this->safeMode) $options['safe'] = 1;
+        if (empty($options['background']) && $this->isSafe()) $options['safe'] = 1;
         
         $result = $this->getCollection($collection)->ensureIndex($keys, $options);
         $this->checkResult($result, isset($options['safe']));
