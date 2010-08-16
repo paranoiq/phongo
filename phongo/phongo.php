@@ -9,10 +9,11 @@ if (!interface_exists('Nette\IDebugPanel', FALSE)) {
     require_once dirname(__FILE__) . '/libs/Nette/IDebugPanel.php';
 }
 
-require_once dirname(__FILE__) . '/libs/Exception.php';
+require_once dirname(__FILE__) . '/libs/exceptions.php';
 require_once dirname(__FILE__) . '/libs/Phongo.php';
 require_once dirname(__FILE__) . '/libs/Object.php';
 require_once dirname(__FILE__) . '/libs/DateTime.php';
+require_once dirname(__FILE__) . '/libs/Id.php';
 require_once dirname(__FILE__) . '/libs/Reference.php';
 require_once dirname(__FILE__) . '/libs/Tools.php';
 require_once dirname(__FILE__) . '/libs/Converter.php';
@@ -28,5 +29,7 @@ require_once dirname(__FILE__) . '/libs/Profiler.php';
 
 //require_once dirname(__FILE__) . '/libs/Prophet.php';
 
-
+function bar($value) {
+    Nette\Debug::barDump($value);
+}
 
