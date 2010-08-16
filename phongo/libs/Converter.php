@@ -39,7 +39,7 @@ class Converter {
     public static function mongoToPhongo($item) {
         $item = Tools::map($item,
             function($item) {
-                if ($item instanceof MongoDate) {
+                if ($item instanceof \MongoDate) {
                     return new DateTime($item);
                 ///
                 } else {
