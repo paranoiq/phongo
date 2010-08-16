@@ -37,7 +37,6 @@ class ConnectionInfo extends Object {
     
     /** @return array */
     public function getServerStatus() {
-        /// fuj
         $status = Converter::mongoToPhongo($this->conn->admin->runCommand(array('serverStatus' => 1)));
         unset($status['ok']);
         return $status;
@@ -45,8 +44,8 @@ class ConnectionInfo extends Object {
     
     /** @return array */
     public function getCommandList() {
-        $stats = $this->conn->admin->runCommand(array('listCommands' => 1));
-        return $stats['commands'];
+        $list = $this->conn->admin->runCommand(array('listCommands' => 1));
+        return $list['commands'];
     }
     
     /** @return array */

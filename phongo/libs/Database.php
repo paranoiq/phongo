@@ -92,8 +92,7 @@ class Database extends Base implements IDatabase {
         if (!isset($this->name)) {
             // MongoDB does not provide database name :[
             // call without profiler!
-            $coll = $this->database->selectCollection('system.namespaces');
-            $ns = $coll->findOne(array(), array());
+            $ns = $this->database->selectCollection('system.namespaces')->findOne();
             $this->name = substr($ns['name'], 0, strpos($ns['name'], '.'));
         }
         return $this->name;
@@ -155,7 +154,7 @@ class Database extends Base implements IDatabase {
     }
     
     
-    // -- COLLECTION SELECTION -----------------------------------------------------------------------------------------
+    // -- COLLECTIONS --------------------------------------------------------------------------------------------------
     
     
     /**
@@ -261,7 +260,7 @@ class Database extends Base implements IDatabase {
     }
     
     
-    // -- DATA QUERIES -------------------------------------------------------------------------------------------------
+    // -- QUERIES ------------------------------------------------------------------------------------------------------
     
     
     /**
@@ -295,8 +294,7 @@ class Database extends Base implements IDatabase {
         if ($query instanceof Reference) return $this->get($query);
         
         if (!$fields) $fields = array();
-        /*dump($fields);
-        exit;*/
+        
         if (!is_array($query)) $query = Converter::jsonToMongo($query);
         
         $namespace = $this->getName() . '.' . $this->determineCollectionName($collection);
@@ -609,7 +607,7 @@ class Database extends Base implements IDatabase {
     }
     
     
-    // -- COLLECTIONS --------------------------------------------------------------------------------------------------
+    // -- COLLECTION ADMINISTRATION ------------------------------------------------------------------------------------
     
     
     /**
@@ -672,7 +670,7 @@ class Database extends Base implements IDatabase {
     }
     
     
-    // -- INDEXES ------------------------------------------------------------------------------------------------------
+    // -- INDEX ADMINISTRATION -----------------------------------------------------------------------------------------
     
     
     /**

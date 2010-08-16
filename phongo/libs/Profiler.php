@@ -152,6 +152,7 @@ class Profiler extends Object implements IProfiler, IDebugPanel {
      */
     public function before($connection, $event, $namespace = NULL, $query = NULL) {
         if (!is_string($query) && !is_null($query)) $query = Json::encode($query);
+        if ($query == '[]') $query = '{}';
         
         if ($event & self::QUERY) self::$numOfQueries++;
         self::$elapsedTime = FALSE;
@@ -313,7 +314,8 @@ class Profiler extends Object implements IProfiler, IDebugPanel {
 </style>
 
 <div class='nette-inner'>
-<table>
+<table class='r1 r5'>
+<colgroup align='right' /><colgroup span='3' /><colgroup align='right' />
 <tr>
     <th>Time</th><th>Type</th><th>Namespace</th><th>Query</th><th>Rows</th><th>Connection</th>
 </tr>

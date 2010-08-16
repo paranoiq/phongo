@@ -241,6 +241,8 @@ class Connection extends Base implements IConnection {
      * @param bool
      */
     public function database($database) {
+        if (isset($this->databases[$database])) return $this->databases[$database];
+        
         if (!empty($this->options['strict']) && !is_null($database) && !in_array($database, $this->getDatabaseList())) 
             throw new DatabaseException("Database '$database' is not created!");
         
@@ -249,6 +251,7 @@ class Connection extends Base implements IConnection {
         
         $db = new Database($this, $this->mongo->selectDB($database), $this->options);
         $this->databases[$database] = $db;
+        
         return $db;
     }
     
