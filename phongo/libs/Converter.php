@@ -3,6 +3,7 @@
 namespace Phongo;
 
 use MongoId;
+use Nette\Json;
 
 
 class Converter {

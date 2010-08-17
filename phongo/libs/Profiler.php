@@ -4,6 +4,7 @@ namespace Phongo;
 
 use Nette\Debug;
 use Nette\IDebugPanel;
+use Nette\Json;
 
 
 /**

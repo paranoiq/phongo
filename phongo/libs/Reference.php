@@ -2,6 +2,8 @@
 
 namespace Phongo;
 
+use MongoDbRef;
+
 
 /**
  * MongoDB object reference wrapper
@@ -15,6 +17,7 @@ class Reference extends Object {
     private $id;
     private $collection;
     private $database;
+    
     
     /**
      * @param string
@@ -44,7 +47,7 @@ class Reference extends Object {
     
     /**
      * @return string
-     */   
+     */
     public function getDatabase() {
         return $this->database;
     }
