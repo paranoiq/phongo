@@ -51,7 +51,7 @@ final class Json
 	 */
 	public static function encode($value)
 	{
-		Debug::tryError();
+		//Debug::tryError();
 		if (function_exists('ini_set')) {
 			$old = ini_set('display_errors', 0); // needed to receive 'Invalid UTF-8 sequence' error
 			//$json = json_encode($value);
@@ -61,7 +61,7 @@ final class Json
 		} else {
 			$json = json_encode($value);
 		}
-		if (Debug::catchError($message)) { // needed to receive 'recursion detected' error
+		if (0/*Debug::catchError($message)*/) { // needed to receive 'recursion detected' error
 			throw new JsonException($message);
 		}
 		return $json;

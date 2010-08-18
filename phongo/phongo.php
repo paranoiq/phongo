@@ -31,6 +31,7 @@ require_once dirname(__FILE__) . '/libs/DatabaseInfo.php';
 require_once dirname(__FILE__) . '/libs/Cache.php';
 require_once dirname(__FILE__) . '/libs/Profiler.php';
 
+require_once dirname(__FILE__) . '/libs/Json/ObjectIterator.php';
 require_once dirname(__FILE__) . '/libs/Json/Serialiser.php';
 require_once dirname(__FILE__) . '/libs/Json/Formater.php';
 
