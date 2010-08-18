@@ -72,7 +72,7 @@ class Serialiser extends Object {
     public function _encode($value) {
         $this->depth++;
         if ($this->depth > $this->maxDepth) 
-            throw new JsonException('Maxmal recursion depth reached.');
+            throw new JsonException('Maximal recursion depth reached.');
         
          
         if (is_string($value)) {

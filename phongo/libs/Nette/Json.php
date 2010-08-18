@@ -49,21 +49,26 @@ final class Json
 	 * @param  mixed
 	 * @return string
 	 */
-	public static function encode($value)
+	public static function encode($value, $options = 0)
 	{
-		//Debug::tryError();
+		$old_er = error_reporting(0);
+		trigger_error(''); // "reset" error_get_last
+		
 		if (function_exists('ini_set')) {
 			$old = ini_set('display_errors', 0); // needed to receive 'Invalid UTF-8 sequence' error
-			//$json = json_encode($value);
-			$args = func_get_args();
-			$json = call_user_func_array('json_encode', $args);
+			$json = json_encode($value, $options);
 			ini_set('display_errors', $old);
 		} else {
 			$json = json_encode($value);
 		}
-		if (0/*Debug::catchError($message)*/) { // needed to receive 'recursion detected' error
-			throw new JsonException($message);
+		
+		error_reporting($old_er);
+		$error = error_get_last(); // needed to receive 'recursion detected' error
+		if ($error && $error['message'] !== '') {
+			throw new JsonException($error['message']);
+			
 		}
+        
 		return $json;
 	}
 
@@ -74,12 +79,10 @@ final class Json
 	 * @param  string
 	 * @return mixed
 	 */
-	public static function decode($json)
+	public static function decode($json, $assoc = false, $depth = 512, $options = 0)
 	{
 		$json = (string) $json;
-		//$value = json_decode($json);
-		$args = func_get_args();
-		$value = call_user_func_array('json_decode', $args);
+		$value = json_decode($json, $assoc, $depth, $options);
 		if ($value === NULL && $json !== '' && strcasecmp($json, 'null')) { // '' do not clean json_last_error
 			$error = PHP_VERSION_ID >= 50300 ? json_last_error() : 0;
 			throw new JsonException(isset(self::$messages[$error]) ? self::$messages[$error] : 'Unknown error', $error);

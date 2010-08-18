@@ -37,8 +37,8 @@ $struct = array(
     'object' => new TestObject()
 );
 
-//echo json_encode($struct);
 $serialiser = new Serialiser(new Formater);
+
 echo $serialiser->encode($struct);
 
 __halt_compiler() ?>
