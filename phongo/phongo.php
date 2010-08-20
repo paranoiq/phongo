@@ -20,6 +20,8 @@ require_once dirname(__FILE__) . '/libs/Object.php';
 require_once dirname(__FILE__) . '/libs/types/DateTime.php';
 require_once dirname(__FILE__) . '/libs/types/ObjectId.php';
 require_once dirname(__FILE__) . '/libs/types/Reference.php';
+require_once dirname(__FILE__) . '/libs/types/Regex.php';
+require_once dirname(__FILE__) . '/libs/types/BinData.php';
 
 require_once dirname(__FILE__) . '/libs/Tools.php';
 require_once dirname(__FILE__) . '/libs/Converter.php';
@@ -34,6 +36,7 @@ require_once dirname(__FILE__) . '/libs/Profiler.php';
 require_once dirname(__FILE__) . '/libs/Json/ObjectIterator.php';
 require_once dirname(__FILE__) . '/libs/Json/Serialiser.php';
 require_once dirname(__FILE__) . '/libs/Json/Formater.php';
+require_once dirname(__FILE__) . '/libs/Json/IndentFormater.php';
 
 function bar($value) {
     Nette\Debug::barDump($value);

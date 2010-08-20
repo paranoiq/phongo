@@ -6,6 +6,16 @@ use Phongo\Object;
 use Nette\Json;
 use Nette\JsonException;
 
+use Phongo\DateTime;
+use Phongo\ObjectId;
+use Phongo\Reference;
+use Phongo\Regex;
+use Phongo\BinData;
+
+use MongoBinData;
+use MongoMinKey;
+use MongoMaxKey;
+
 
 /**
  * Traverses and encodes structures to JSON
@@ -51,8 +61,8 @@ class Serialiser extends Object {
     }
     
     private function flush() {
-        call_user_func($this->outputCallback, substr($this->buffer, 0, $chunkSize));
-        $this->buffer = substr($this->buffer, $chunkSize);
+        call_user_func($this->outputCallback, substr($this->buffer, 0, $this->chunkSize));
+        $this->buffer = substr($this->buffer, $this->chunkSize);
     }
     
     
@@ -63,6 +73,8 @@ class Serialiser extends Object {
     public function encode($value) {
         $this->_encode($value);
         
+        // empty root element is always object
+        if ($this->buffer == '[]') $this->buffer = '{}';
         // finish
         if (isset($this->outputCallback)) $this->flush();
         return $this->buffer;
@@ -74,7 +86,6 @@ class Serialiser extends Object {
         if ($this->depth > $this->maxDepth) 
             throw new JsonException('Maximal recursion depth reached.');
         
-         
         if (is_string($value)) {
             $this->buffer .= $this->formater->formatString($value);
             
@@ -93,8 +104,9 @@ class Serialiser extends Object {
         // indexed array
         } elseif (is_array($value) && (!$value || array_keys($value) === range(0, count($value) - 1))) {
             $this->buffer .= $this->formater->beginArray();
+            $next = FALSE;
             foreach ($value as $key => $val) {
-                if (!isset($next)) {
+                if (!$next) {
                     $next = TRUE;
                 } else {
                     $this->buffer .= $this->formater->nextItem();
@@ -108,8 +120,9 @@ class Serialiser extends Object {
         // associative array
         } elseif (is_array($value)) {
             $this->buffer .= $this->formater->beginObject();
+            $next = FALSE;
             foreach ($value as $key => $val) {
-                if (!isset($next)) {
+                if (!$next) {
                     $next = TRUE;
                 } else {
                     $this->buffer .= $this->formater->nextItem();
@@ -124,26 +137,44 @@ class Serialiser extends Object {
             $this->buffer .= $this->formater->endObject();
             
         } elseif (is_object($value)) {
-            $this->buffer .= $this->formater->beginObject();
-            foreach (new ObjectIterator($value) as $key => $val) {
-                if (!isset($next)) {
-                    $next = TRUE;
-                } else {
-                    $this->buffer .= $this->formater->nextItem();
+            if ($value instanceof ObjectId) {
+                $this->buffer .= $this->formater->formatObjectId($value->id);
+            } elseif ($value instanceof Reference) {
+                $this->buffer .= $this->formater->formatReference($value->id, $value->collection, $value->database);
+            } elseif ($value instanceof DateTime) {
+                $this->buffer .= $this->formater->formatDate((string) $value);
+            } elseif ($value instanceof Regex) {
+                $this->buffer .= $this->formater->formatRegex($value->regex, $value->flags);
+            } elseif ($value instanceof BinData) {
+                $this->buffer .= $this->formater->formatBinData($value->data, MongoBinData::BYTE_ARRAY);
+            } elseif ($value instanceof MongoMinKey) {
+                $this->buffer .= $this->formater->formatMinKey();
+            } elseif ($value instanceof MongoMaxKey) {
+                $this->buffer .= $this->formater->formatMaxKey();
+            } else {
+                $this->buffer .= $this->formater->beginObject();
+                $next = FALSE;
+                foreach (new ObjectIterator($value) as $key => $val) {
+                    if (!$next) {
+                        $next = TRUE;
+                    } else {
+                        $this->buffer .= $this->formater->nextItem();
+                    }
+                    $this->buffer .= $this->formater->beginPair();
+                    $this->buffer .= $this->formater->formatKey($key);
+                    $this->buffer .= $this->formater->beginValue();
+                    $this->_encode($val);
+                    $this->buffer .= $this->formater->endValue();
+                    $this->buffer .= $this->formater->endPair();
                 }
-                $this->buffer .= $this->formater->beginPair();
-                $this->buffer .= $this->formater->formatKey($key);
-                $this->buffer .= $this->formater->beginValue();
-                $this->_encode($val);
-                $this->buffer .= $this->formater->endValue();
-                $this->buffer .= $this->formater->endPair();
+                $this->buffer .= $this->formater->endObject();
             }
-            $this->buffer .= $this->formater->endObject();
             
         } else {
             throw new JsonException('Resource cannot be serialised to JSON.');
         }
         
+        if (isset($this->outputCallback) && strlen($this->buffer) >= $this->chunkSize) $this->flush();
         $this->depth--;
     }
     

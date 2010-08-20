@@ -11,22 +11,39 @@ use Nette\Json;
  */
 interface IFormater {
     /**#@+ @return string */
+    /** @param bool|null */
     public function formatBool($value);
+    /** @param int */
     public function formatInt($value);
+    /** @param float */
     public function formatFloat($value);
+    /** @param string */
     public function formatString($value);
-    public function formatId($id);
+    /** @param string */
+    public function formatObjectId($id);
+    /** @param string
+     *  @param string
+     *  @param string */
     public function formatReference($id, $collection, $database = NULL);
+    /** @param string */
     public function formatDate($value);
+    /** @param string
+     *  @param string */
     public function formatRegex($regex, $params);
-    public function formatBinary($data, $type);
+    /** @param string
+     *  @param int */
+    public function formatBinData($data, $type);
+    /** @param string */
     public function formatCode($code);
+    public function formatMinKey();
+    public function formatMaxKey();
     public function beginArray();
     public function endArray();
     public function beginObject();
     public function endObject();
     public function beginPair();
     public function endPair();
+    /** @param string */
     public function formatKey($key);
     public function beginValue();
     public function endValue();
@@ -35,53 +52,58 @@ interface IFormater {
 }
 
 
+/**
+ * Basic inline JSON fomater
+ */
 class Formater extends Object implements IFormater {
     
-    /**#@+ @return string */
     public function formatBool($value) {
-        //if ($value === NULL) return 'null';
-        //return $value ? 'true' : 'false';
-        return Json::encode($value);
+        return json_encode($value);
     }
     
     public function formatInt($value) {
-        //return (string) $value;
-        return Json::encode($value);
+        return json_encode($value);
     }
     
     public function formatFloat($value) {
-        //$num = rtrim(number_format($val, 13, '.', ''), '0');
-        //return str_pos($num, '.') ? $num . '0' : $num;
-        return Json::encode($value);
+        return json_encode($value);
     }
     
     public function formatString($value) {
         return Json::encode($value);
     }
     
-    public function formatId($id) {
-        return '{"$oid": "' . $id . '"}';
+    public function formatObjectId($id) {
+        return '{"$oid":"' . $id . '"}';
     }
     
     public function formatReference($id, $collection, $database = NULL) {
-        return '{"$ref": "' . $collection . '", "$id": "' . $id . (isset($db) ? '", "$db": "' . $database : '') . '"}';
+        return '{"$ref":"' . $collection . '","$id":"' . $id . (isset($database) ? '","$db":"' . $database : '') . '"}';
     }
     
     public function formatDate($value) {
-        return '{"$date": "' . $value . '"}';
+        return '{"$date":"' . $value . '"}';
     }
     
     public function formatRegex($regex, $params) {
-        return '{"$regex": "' . $regex . '", "$options": "' . $params . '"}';
+        return '{"$regex":"' . $regex . '","$options":"' . $params . '"}';
     }
     
-    public function formatBinary($data, $type) {
-        return '{"$binary": "' . base64_encode($data) . '", "$type": "' . $type . '"}';
+    public function formatBinData($data, $type) {
+        return '{"$binary":"' . base64_encode($data) . '","$type":"' . $type . '"}';
     }
     
     public function formatCode($code) {
         /// pravděpodobně binary type MongoBinData::FUNC
         throw new Exception('NYI');
+    }
+    
+    public function formatMinKey() {
+        return '{"$minKey":1}';
+    }
+    
+    public function formatMaxKey() {
+        return '{"$maxKey:1"}';
     }
     
     public function beginArray() {
@@ -123,5 +145,5 @@ class Formater extends Object implements IFormater {
     public function nextItem() {
         return ',';
     }
-    /**#@-*/
+    
 }
