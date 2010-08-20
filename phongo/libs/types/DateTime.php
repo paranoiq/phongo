@@ -21,8 +21,10 @@ class DateTime extends \DateTime {
             parent::__construct();
             $this->setTimestamp($time->sec);
             $this->usec = $time->usec;
-        } else {
+        } elseif ($timezone) {
             parent::__construct($time, $timezone);
+        } else {
+            parent::__construct($time);
         }
     }
     
