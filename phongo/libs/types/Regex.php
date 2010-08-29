@@ -1,10 +1,6 @@
 <?php
-
 namespace Phongo;
-
 use MongoRegex;
-
-
 /**
  * MongoDB object id wrapper
  * 
@@ -15,7 +11,6 @@ class Regex extends Object {
     
     protected $regex;
     protected $flags;
-    protected $delim = '/';
     
     
     /** @param string
@@ -24,10 +19,10 @@ class Regex extends Object {
         if ($regex instanceof MongoRegex) {
             $this->regex = $regex->regex;
             $this->flags = $regex->flags;
-            /// detect delimeter somehow?
         } else {
-            $this->delim = substr($regex, 0, 1);
-            $end = strlen($regex) - strpos(strrev($regex), $this->delim);
+            if (substr($regex, 0, 1) !== '/')
+                throw InvalidArgumentException('The only supported regular expression delimiter is slash \'/\'.');
+            $end = strlen($regex) - strpos(strrev($regex), '/');
             $this->regex = substr($regex, 1, $end - 2);
             $this->flags = substr($regex, $end);
         }
@@ -35,7 +30,7 @@ class Regex extends Object {
     
     /** @return MongoRegex */
     public function getMongoRegex() {
-        return new MongoRegex($this->delim . $this->regex . $this->delim . $this->flags);
+        return new MongoRegex('/' . $this->regex . '/' . $this->flags);
     }
     
     /** @return string */
@@ -50,7 +45,7 @@ class Regex extends Object {
     
     /** @return string */
     public function __toString() {
-        return $this->delim . $this->regex . $this->delim . $this->flags;
+        return '/' . $this->regex . '/' . $this->flags;
     }
     
 }
