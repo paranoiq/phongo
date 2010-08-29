@@ -1,7 +1,7 @@
 <?php
 
 use Phongo\Json\Serialiser;
-use Phongo\Json\Formater;
+use Phongo\Json\BasicFormater;
 
 require __DIR__ . '/../initialize.php';
 
@@ -18,11 +18,11 @@ $struct = array(
     'maxkey' => new MongoMaxKey,
 );
 
-$serialiser = new Serialiser(new Formater);
+$serialiser = new Serialiser(new BasicFormater);
 
 echo $serialiser->encode($struct);
 
 __halt_compiler() ?>
 
 ------EXPECT------
-{"id":{"$oid":"1234567890ABCDEF12345678"},"ref":{"$ref":"Coll-1","$id":"1234567890ABCDEF12345678","$db":"Db-1"},"date":{"$date":"2010-08-19 14:09:00"},"regex":{"$regex":"^[0-9a-f]+$","$options":"i"},"binary":{"$binary":"AAECAwQFBgcICQoLDA0ODw==","$type":"2"},"minkey":{"$minKey":1},"maxkey":{"$maxKey:1"}}
+{"id":{"$oid":"1234567890ABCDEF12345678"},"ref":{"$ref":"Coll-1","$id":"1234567890ABCDEF12345678","$db":"Db-1"},"date":{"$date":"2010-08-19 14:09:00"},"regex":{"$regex":"^[0-9a-f]+$","$options":"i"},"binary":{"$binary":"AAECAwQFBgcICQoLDA0ODw==","$type":"2"},"minkey":{"$minKey":1},"maxkey":{"$maxKey":1}}

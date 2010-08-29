@@ -1,7 +1,7 @@
 <?php
 
 use Phongo\Json\Serialiser;
-use Phongo\Json\Formater;
+use Phongo\Json\BasicFormater;
 
 require __DIR__ . '/../initialize.php';
 
@@ -19,7 +19,7 @@ $struct = array(
     'object' => new TestObject()
 );
 
-$serialiser = new Serialiser(new Formater);
+$serialiser = new Serialiser(new BasicFormater);
 
 function ocb($data) {
     echo $data . "\n--------\n";

@@ -55,7 +55,7 @@ interface IFormater {
 /**
  * Basic inline JSON fomater
  */
-class Formater extends Object implements IFormater {
+class BasicFormater extends Object implements IFormater {
     
     public function formatBool($value) {
         return json_encode($value);
@@ -103,7 +103,7 @@ class Formater extends Object implements IFormater {
     }
     
     public function formatMaxKey() {
-        return '{"$maxKey:1"}';
+        return '{"$maxKey":1}';
     }
     
     public function beginArray() {

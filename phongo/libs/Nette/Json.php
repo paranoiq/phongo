@@ -79,10 +79,10 @@ final class Json
 	 * @param  string
 	 * @return mixed
 	 */
-	public static function decode($json, $assoc = false, $depth = 512, $options = 0)
+	public static function decode($json, $assoc = false, $depth = 512/*, $options = 0*/)
 	{
 		$json = (string) $json;
-		$value = json_decode($json, $assoc, $depth, $options);
+		$value = json_decode($json, $assoc, $depth/*, $options*/);
 		if ($value === NULL && $json !== '' && strcasecmp($json, 'null')) { // '' do not clean json_last_error
 			$error = PHP_VERSION_ID >= 50300 ? json_last_error() : 0;
 			throw new JsonException(isset(self::$messages[$error]) ? self::$messages[$error] : 'Unknown error', $error);

@@ -6,19 +6,16 @@ use Phongo\Object;
 use Nette\Json;
 use Nette\JsonException;
 
-use Phongo\DateTime;
 use Phongo\ObjectId;
 use Phongo\Reference;
 use Phongo\Regex;
 use Phongo\BinData;
 
-use MongoBinData;
-use MongoMinKey;
-use MongoMaxKey;
-
 
 /**
  * Traverses and encodes structures to JSON
+ * 
+ * Set output callback to get results in chunks - for big amount of data
  */
 class Serialiser extends Object {
     
@@ -137,20 +134,35 @@ class Serialiser extends Object {
             $this->buffer .= $this->formater->endObject();
             
         } elseif (is_object($value)) {
-            if ($value instanceof ObjectId) {
+            /***/ if ($value instanceof ObjectId) {
                 $this->buffer .= $this->formater->formatObjectId($value->id);
+            } elseif ($value instanceof \MongoId) {
+                $this->buffer .= $this->formater->formatObjectId((string) $value);
+                
             } elseif ($value instanceof Reference) {
                 $this->buffer .= $this->formater->formatReference($value->id, $value->collection, $value->database);
-            } elseif ($value instanceof DateTime) {
-                $this->buffer .= $this->formater->formatDate((string) $value);
+                    
+            } elseif ($value instanceof \DateTime) {
+                $this->buffer .= $this->formater->formatDate($value->format('Y-m-d H:i:s'));
+            } elseif ($value instanceof \MongoDate) {
+                $value = new DateTime($value);
+                $this->buffer .= $this->formater->formatDate($value->format('Y-m-d H:i:s'));
+                
             } elseif ($value instanceof Regex) {
                 $this->buffer .= $this->formater->formatRegex($value->regex, $value->flags);
+            } elseif ($value instanceof \MongoRegex) {
+                $this->buffer .= $this->formater->formatRegex($value->regex, $value->flags);
+                
             } elseif ($value instanceof BinData) {
-                $this->buffer .= $this->formater->formatBinData($value->data, MongoBinData::BYTE_ARRAY);
-            } elseif ($value instanceof MongoMinKey) {
+                $this->buffer .= $this->formater->formatBinData($value->data, \MongoBinData::BYTE_ARRAY);
+            } elseif ($value instanceof \MongoBinData) {
+                $this->buffer .= $this->formater->formatBinData($value->bin, $value->type);
+                
+            } elseif ($value instanceof \MongoMinKey) {
                 $this->buffer .= $this->formater->formatMinKey();
-            } elseif ($value instanceof MongoMaxKey) {
+            } elseif ($value instanceof \MongoMaxKey) {
                 $this->buffer .= $this->formater->formatMaxKey();
+            
             } else {
                 $this->buffer .= $this->formater->beginObject();
                 $next = FALSE;

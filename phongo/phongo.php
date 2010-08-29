@@ -35,8 +35,9 @@ require_once dirname(__FILE__) . '/libs/Profiler.php';
 
 require_once dirname(__FILE__) . '/libs/Json/ObjectIterator.php';
 require_once dirname(__FILE__) . '/libs/Json/Serialiser.php';
-require_once dirname(__FILE__) . '/libs/Json/Formater.php';
-require_once dirname(__FILE__) . '/libs/Json/IndentFormater.php';
+require_once dirname(__FILE__) . '/libs/Json/BasicFormater.php';
+require_once dirname(__FILE__) . '/libs/Json/ExtendedFormater.php';
+require_once dirname(__FILE__) . '/libs/Json/HtmlFormater.php';
 
 function bar($value) {
     Nette\Debug::barDump($value);
