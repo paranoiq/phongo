@@ -62,9 +62,10 @@ class Database extends Base implements IDatabase {
      * @param string
      * @param array
      */
-    public function __construct(IConnection $connection, MongoDB $database, $options = array()) {
+    public function __construct(IConnection $connection, MongoDB $database, $options = array(), $name) {
         $this->connection = $connection;
         $this->database = $database;
+        $this->name = $name;
         
         $this->options = $options;
         
