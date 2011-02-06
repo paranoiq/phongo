@@ -134,7 +134,7 @@ class HtmlFormater extends ExtendedFormater {
         if ($this->prev == self::OBJECT_CONTEXT) $ret = "\n" . $this->indent();
         $this->context[] = self::ARRAY_CONTEXT;
         $this->level++;
-        return $ret . "<span class='t-array'>[";
+        return $ret . "<span class='t-array'><span class='t-par'>[</span>";
     }
     
     public function endArray() {
@@ -143,7 +143,7 @@ class HtmlFormater extends ExtendedFormater {
         $ret = '';
         if ($this->prev == self::OBJECT_CONTEXT) $ret = "\n" . $this->indent();
         $this->prev = self::ARRAY_CONTEXT;
-        return $ret . ']</span>';
+        return $ret . "<span class='t-par'>]</span></span>";
     }
     
     public function beginObject() {
@@ -151,14 +151,14 @@ class HtmlFormater extends ExtendedFormater {
         if ($this->context[$this->level] == self::ARRAY_CONTEXT) $ret = "\n" . $this->indent(); 
         $this->context[] = self::OBJECT_CONTEXT;
         $this->level++;
-        return $ret . "<span class='t-object'>{";
+        return $ret . "<span class='t-object'><span class='t-par'>{</span>";
     }
     
     public function endObject() {
         array_pop($this->context);
         $this->level--;
         $this->prev = self::OBJECT_CONTEXT;
-        return "\n" . $this->indent() . '}</span>';
+        return "\n" . $this->indent() . "<span class='t-par'>}</span></span>";
     }
     
     public function beginPair() {
