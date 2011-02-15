@@ -243,8 +243,8 @@ class Database extends Base implements IDatabase {
         
         if (isset($this->namespace)) $name = $this->namespace . '.' . $name;
         
-        if (!Tools::validateCollectionName($collection, TRUE))
-            throw new \InvalidArgumentException("Collection name '$collection' is not valid.");
+        if (!Tools::validateCollectionName($name, TRUE))
+            throw new \InvalidArgumentException("Collection name '$name' is not valid.");
         
         if ($this->isStrict() && !preg_match('/^(local|system|$cmd.sys)\./', $name) && !in_array($name, $this->getInfo()->getCollectionList())) 
             throw new DatabaseException("Collection '$name' does not exist!");
